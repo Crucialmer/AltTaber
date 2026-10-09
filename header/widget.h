@@ -80,6 +80,8 @@ private:
     bool forceShow();
     /// 执行"切换到当前选中项"并隐藏（Alt释放与pinned确认共用）
     void switchToCurrentItem();
+    /// 循环选择（forward=true 下一个 / false 上一个）
+    void cycleSelection(bool forward);
     void showLabelForItem(QListWidgetItem* item, QString text = QString());
     void setupLabelFont();
     auto getLastActiveGroupWindow(const QString& exePath) -> QPair<HWND, QDateTime>;

@@ -2,7 +2,7 @@
 
 > **Fork 维护版**：基于 [MrBeanCpp/AltTaber](https://github.com/MrBeanCpp/AltTaber) 的个人维护分支，
 > 包含 22 项 bug 修复、性能优化（钩子异步化、托盘菜单加速）、
-> 新功能 **Ctrl+Alt+Tab 固定切换器**（松开按键后保持显示）与 GitHub Actions 自动构建发布。
+> 新功能 **Alt+Tab / Ctrl+Alt+Tab 固定切换器**（松开按键后保持显示，Tab 循环、Enter/空格 确认、Esc 取消）与 GitHub Actions 自动构建发布。
 > 下载：[Releases](https://github.com/Crucialmer/AltTaber/releases)
 
 ![GitHub release (latest by date)](https://img.shields.io/github/v/release/Crucialmer/AltTaber)
@@ -19,7 +19,7 @@
 ### 1. ``` Alt+Tab ```: 在应用程序📦间切换
 
 - 按住`Shift`反向切换
-- 松开`Alt`后，切换到指定应用
+- 松开`Alt`后切换器保持显示，`Enter`/空格/双击 确认切换，`Esc`/点击别处 取消
 - **最近使用**的应用优先排在左侧
 
 ![switch apps](img/Alt_tab.gif)
@@ -28,7 +28,7 @@
 
 - 按住`Shift`反向切换
 - **最近活动**的窗口优先访问
-- 可用于隐藏`AltTaber`窗口（若可见）
+- 弹出器未显示时用于同组窗口轮换（弹出器显示时 `` ` `` 键用于列表选择）
 
 ![switch windows](img/Alt_`.gif)
 
@@ -45,6 +45,10 @@
 - 支持`Vim`风格的快捷键:
     - `h` `l`: 切换当前选中的应用
     - `j` `k`: 切换/最小化窗口
+- `Tab` / `Shift`+`Tab`: 向右 / 向左循环选择
+- `` ` `` / `Shift`+`` ` ``: 向左 / 向右循环选择
+- `Enter` / `空格` / 双击: 确认切换
+- `Esc` / 点击别处: 取消
 
 ![wheel](img/Alt_Wheel.gif)
 

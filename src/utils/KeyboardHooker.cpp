@@ -36,7 +36,12 @@ LRESULT keyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                         return 1; // 阻止事件传递（拦截系统的 Ctrl+Alt+Tab 固定切换器）
                     }
                     qDebug() << "Alt+Tab detected!";
-                    if ((HWND) Hooker::receiver->winId() != GetForegroundWindow()) { // not Foreground
+                    if (Hooker::receiver->isVisible() && !Hooker::receiver->isMinimized()) {
+                        // 弹出器已显示（pinned）：直接转发循环选择——不依赖键盘焦点，
+                        // 抢焦点失败（可见但非前台）时也能连续切换，且不刷新列表、不丢选择
+                        auto shiftModifier = Util::isKeyPressed(VK_SHIFT) ? Qt::ShiftModifier : Qt::NoModifier;
+                        QApplication::postEvent(Hooker::receiver, new QKeyEvent(QEvent::KeyPress, Qt::Key_Tab, Qt::AltModifier | shiftModifier));
+                    } else if ((HWND) Hooker::receiver->winId() != GetForegroundWindow()) { // not Foreground
                         // 异步，防止阻塞；超过1s会导致被系统强制绕过，传递给下一个钩子
                         // 方案A：Alt+Tab 也走 pinned 模式——松开 Alt 后切换器保持显示，Enter/空格/点击确认，Esc 取消
                         QMetaObject::invokeMethod(Hooker::receiver, "requestShowPinned", Qt::QueuedConnection);
@@ -53,6 +58,49 @@ LRESULT keyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     auto event = new QKeyEvent(QEvent::KeyPress, Qt::Key_QuoteLeft, Qt::AltModifier | shiftModifier);
                     QApplication::postEvent(Hooker::receiver, event); // async
                     return 1; // 阻止事件传递
+                }
+            }
+
+            // 弹出器显示中（pinned）：接管选择/确认/取消键——不依赖系统键盘焦点。
+            // 松开 Alt 后按键若靠系统投递：焦点不在弹窗上时直接丢失、焦点在列表控件上时被
+            // 消费（Tab=焦点导航、`=键盘搜索）；Alt 按住时还会泄漏为系统快捷键（Alt+←/→=
+            // 前进后退、Alt+Esc=窗口循环）。统一在此截获为合成事件直达 Widget。
+            const bool popupActive = Hooker::receiver && Hooker::receiver->isVisible()
+                                     && !Hooker::receiver->isMinimized(); // isVisible() 在最小化时仍为 true
+            if (popupActive) {
+                const bool ctrl = Util::isKeyPressed(VK_CONTROL);
+                const bool winPressed = Util::isKeyPressed(VK_LWIN) || Util::isKeyPressed(VK_RWIN);
+                const bool isForeground = (HWND) Hooker::receiver->winId() == GetForegroundWindow();
+                int qtKey = 0;
+                // Win 组合（Win+Tab / Win+方向键 / Win+Space 等）一律放行；
+                // Ctrl 组合逐项判断（Ctrl+Space=输入法切换、Ctrl+Esc=开始菜单、Ctrl+Tab 等均放行）
+                if (!winPressed) {
+                    switch (pKeyBoard->vkCode) {
+                        // Alt 按住时 Tab/` 已由上方分支处理
+                        case VK_TAB:    if (!isAltPressed && !ctrl) qtKey = Qt::Key_Tab; break;
+                        case VK_OEM_3:  if (!isAltPressed && !ctrl) qtKey = Qt::Key_QuoteLeft; break;
+                        case VK_RETURN: if (!ctrl) qtKey = Qt::Key_Return; break;
+                        case VK_SPACE:  if (!ctrl) qtKey = Qt::Key_Space; break;
+                        case VK_ESCAPE: if (!ctrl) qtKey = Qt::Key_Escape; break; // Ctrl+Esc=开始菜单，放行
+                        case VK_UP:     if (!ctrl) qtKey = Qt::Key_Up; break;
+                        case VK_DOWN:   if (!ctrl) qtKey = Qt::Key_Down; break;
+                        case VK_LEFT:   if (!ctrl) qtKey = Qt::Key_Left; break;
+                        case VK_RIGHT:  if (!ctrl) qtKey = Qt::Key_Right; break;
+                        // Vim 键直接映射为方向键（绕过列表控件原生键盘搜索/事件冒泡的不确定性）；
+                        // 仅当弹窗持有前台时接管，避免吞掉在其他窗口正常输入 h/j/k/l 字母
+                        case VK_H:      if (isForeground && !ctrl) qtKey = Qt::Key_Left; break;
+                        case VK_J:      if (isForeground && !ctrl) qtKey = Qt::Key_Down; break;
+                        case VK_K:      if (isForeground && !ctrl) qtKey = Qt::Key_Up; break;
+                        case VK_L:      if (isForeground && !ctrl) qtKey = Qt::Key_Right; break;
+                        default: break;
+                    }
+                }
+                if (qtKey) {
+                    Qt::KeyboardModifiers mods = Util::isKeyPressed(VK_SHIFT) ? Qt::ShiftModifier : Qt::NoModifier;
+                    if (qtKey == Qt::Key_Tab)
+                        mods |= Qt::AltModifier; // 无修饰键的 Tab 会被 QWidget::event 当焦点切换吞掉，带 Alt 可绕过
+                    QApplication::postEvent(Hooker::receiver, new QKeyEvent(QEvent::KeyPress, qtKey, mods));
+                    return 1; // 阻止系统投递：按键仅由弹出器处理
                 }
             }
         } else if (wParam == WM_KEYUP || wParam == WM_SYSKEYUP) { // Amazing, Alt Down is `WM_SYSKEYDOWN`, but release is `WM_KEYUP`

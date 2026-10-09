@@ -91,29 +91,19 @@ void Widget::keyPressEvent(QKeyEvent* event) {
             return;
         }
     } else if (key == Qt::Key_Escape) {
-        // pinned 模式下 Esc 取消（不切换，直接隐藏）
-        if (pinned && this->isVisible()) {
+        // 弹出器显示中 Esc 取消（不切换，直接隐藏）——兼容非 pinned 呼出路径
+        if (this->isVisible()) {
             pinned = false;
             hide();
             return;
         }
-    } else if (key == Qt::Key_Tab) { // switch to next or prev
-        if (lw->count() == 0) return QWidget::keyPressEvent(event);
-        auto i = lw->currentRow();
-        bool isShiftPressed = (modifiers & Qt::ShiftModifier);
-        // weird formula, but works (hhh)
-        auto index = (i - (2 * isShiftPressed - 1) + lw->count()) % lw->count();
-        lw->setCurrentRow(index);
+    } else if (key == Qt::Key_Tab || key == Qt::Key_Backtab) { // switch to next or prev
+        cycleSelection(!((modifiers & Qt::ShiftModifier) || key == Qt::Key_Backtab)); // Backtab = Shift+Tab
     } else if (key == Qt::Key_QuoteLeft && this->isVisible()) {
         // 弹出器显示中：`（Tab 上方键）= 向左循环选择（与 Tab 向右对称）；Shift+` 向右
         // 注意：此分支在 Alt+` 同应用轮换分支之前——弹出器可见时 ` 键优先用于列表选择，
         // Alt+` 的同应用窗口轮换仅在弹出器不可见时生效（原语义保留）
-        if (lw->count() == 0) return QWidget::keyPressEvent(event);
-        const int N = lw->count();
-        const int i = lw->currentRow();
-        const bool isShiftPressed = (modifiers & Qt::ShiftModifier);
-        auto index = (i + (isShiftPressed ? 1 : -1) + N) % N;
-        lw->setCurrentRow(index);
+        cycleSelection(modifiers & Qt::ShiftModifier);
     } else if (key == Qt::Key_QuoteLeft && (modifiers & Qt::AltModifier)) { // Alt + `, 在前台窗口同组窗口间切换（弹出器不可见时）
         if (this->isVisible() && !this->isMinimized()) {
             // isVisible() == true if minimized
@@ -139,14 +129,10 @@ void Widget::keyPressEvent(QKeyEvent* event) {
                                               Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
             QApplication::postEvent(lw, wheelEvent);
         }
-    } else if (key == Qt::Key_Left || key == Qt::Key_Right) { // 默认情况下 左右键可以切换item 只需要处理边界循环即可
-        const int N = lw->count();
-        if (N == 0) return QWidget::keyPressEvent(event);
-        const int i = lw->currentRow();
-        if (key == Qt::Key_Left && i == 0)
-            lw->setCurrentRow(N - 1);
-        else if (key == Qt::Key_Right && i == N - 1)
-            lw->setCurrentRow(0);
+    } else if (key == Qt::Key_Left || key == Qt::Key_Right) {
+        // 左右循环选择（完整处理而非仅边界）：钩子转发的合成事件直达本函数，
+        // 不经过列表控件的原生光标移动，因此这里需要处理全部位置
+        cycleSelection(key == Qt::Key_Right);
     } else if (VimArrows.contains(key)) { // map [K J H L] to [↑ ↓ ← →]
         QApplication::postEvent(lw, new QKeyEvent(QEvent::KeyPress, VimArrows.value(key), modifiers));
     }
@@ -383,13 +369,15 @@ bool Widget::requestShow() { // TODO 当前台是开始菜单（Win）时，会�
 /// 期间可用 Tab/`/方向键/Vim 键选择，Enter/空格/点击 确认切换，Esc 取消
 /// 方案A：Alt+Tab 与 Ctrl+Alt+Tab 均走此路径
 void Widget::requestShowPinned() {
-    if (pinned && this->isVisible()) {
+    if (pinned && this->isVisible() && !this->isMinimized()) {
         // 已在 pinned 显示中：重复触发不确认（钩子已对自动重复去重，这里防御），
-        // 刷新列表继续选择
+        // 刷新列表继续选择；若被其他窗口抢走了焦点/前台，重新置前（不刷新则可能被压到后面）
         if (!prepareListWidget()) {
             pinned = false;
             return;
         }
+        if (!isForeground())
+            forceShow(); // 抢回前台（showMinimized/showNormal 组合）
         return;
     }
     pinned = true;
@@ -418,7 +406,18 @@ void Widget::switchToCurrentItem() {
             }
         }
     }
+    pinned = false; // 已离开 pinned 状态（确认切换后）
     hide(); //! must hide after active target window, or focus may fallback to prev foreground window (like 网易云音乐)
+}
+
+/// 循环选择（forward=true 下一个 / false 上一个）——供 keyPressEvent 与 eventFilter 共用，
+/// 不依赖列表控件的原生键盘处理（钩子转发的合成事件与被控件消费的按键都从这里走）
+void Widget::cycleSelection(bool forward) {
+    const int N = lw->count();
+    if (N == 0) return;
+    int i = lw->currentRow();
+    if (i < 0) i = forward ? -1 : 0; // 无选中时：下一个 → 首项；上一个 → 末项
+    lw->setCurrentRow((i + (forward ? 1 : -1) + N) % N);
 }
 
 /// Warning: the `HWND` not guarantee to be valid (may be closed)
@@ -466,8 +465,8 @@ QList<HWND> Widget::buildGroupWindowOrder(const QString& exePath) {
 
 bool Widget::eventFilter(QObject* watched, QEvent* event) {
     if (watched == lw && event->type() == QEvent::MouseButtonDblClick) {
-        // pinned 模式下双击确认切换（单击仍用于选择）
-        if (pinned && this->isVisible()) {
+        // 双击确认切换（单击仍用于选择）——所有呼出路径均适用（含非 pinned 的兜底路径）
+        if (this->isVisible()) {
             switchToCurrentItem();
             return true;
         }
@@ -480,15 +479,18 @@ bool Widget::eventFilter(QObject* watched, QEvent* event) {
             switchToCurrentItem();
             return true; // 不再传给列表（空格默认会触发 item 激活/选中变化）
         }
-        if (pinned && this->isVisible() && key == Qt::Key_Escape) {
+        if (this->isVisible() && key == Qt::Key_Escape) {
             pinned = false;
             hide();
             return true;
         }
-        // 真实 Tab 按键（Alt 已松开、pinned 显示中）会被列表控件作为焦点导航消费，
-        // 不会冒泡到 Widget::keyPressEvent——在此拦截并重派发，保证 Tab=向右循环
-        if (this->isVisible() && (key == Qt::Key_Tab || key == Qt::Key_Backtab)) {
-            QApplication::sendEvent(this, event);
+        // 兜底：焦点在列表控件时，Tab/Backtab/` 会被控件消费（焦点导航/键盘搜索），
+        // 不会冒泡到 Widget::keyPressEvent——在此直接执行循环选择（直调比重发事件可靠，
+        // 避免被 QWidget::event 的 Tab 焦点切换逻辑二次拦截；正常路径由键盘钩子直接投递）
+        if (this->isVisible() && !(keyEvent->modifiers() & Qt::ControlModifier) &&
+            (key == Qt::Key_Tab || key == Qt::Key_Backtab || key == Qt::Key_QuoteLeft)) {
+            const bool isShiftPressed = (keyEvent->modifiers() & Qt::ShiftModifier) || key == Qt::Key_Backtab;
+            cycleSelection(key == Qt::Key_QuoteLeft ? isShiftPressed : !isShiftPressed);
             return true;
         }
     }
