@@ -119,9 +119,11 @@
 [label]
 font_family = "Microsoft YaHei UI"
 font_size = 10
+font_weight = 400
 ```
 
 > `font_size` 支持小数，如 `10.5`（100% 缩放下恰好为 14px，显示更清晰）。
+> `font_weight` 字重（可选）：`400` 常规 / `500` 中等 / `600` 半粗 / `700` 粗体，也可写 `bold` / `normal`。
 
 ## 🧐Reference
 
