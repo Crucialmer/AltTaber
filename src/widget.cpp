@@ -84,9 +84,9 @@ void Widget::keyPressEvent(QKeyEvent* event) {
         {Qt::Key_H, Qt::Key_Left},  // ←
         {Qt::Key_L, Qt::Key_Right}, // →
     };
-    if (key == Qt::Key_Return || key == Qt::Key_Enter) {
-        // pinned 模式下 Enter 确认切换；非 pinned 时 Alt 还按着，Enter 交由默认处理
-        if (pinned && this->isVisible()) {
+    if (key == Qt::Key_Return || key == Qt::Key_Enter || key == Qt::Key_Space) {
+        // 确认切换：pinned 模式的 Enter/空格；普通模式（按住Alt）也可空格提前确认
+        if (this->isVisible()) {
             switchToCurrentItem();
             return;
         }
@@ -458,6 +458,20 @@ bool Widget::eventFilter(QObject* watched, QEvent* event) {
         // pinned 模式下双击确认切换（单击仍用于选择）
         if (pinned && this->isVisible()) {
             switchToCurrentItem();
+            return true;
+        }
+    }
+    if (watched == lw && event->type() == QEvent::KeyPress) {
+        // 焦点在列表控件时，确认/取消键不会冒泡到 Widget::keyPressEvent，在此拦截
+        auto* keyEvent = static_cast<QKeyEvent*>(event);
+        const auto key = keyEvent->key();
+        if (this->isVisible() && (key == Qt::Key_Return || key == Qt::Key_Enter || key == Qt::Key_Space)) {
+            switchToCurrentItem();
+            return true; // 不再传给列表（空格默认会触发 item 激活/选中变化）
+        }
+        if (pinned && this->isVisible() && key == Qt::Key_Escape) {
+            pinned = false;
+            hide();
             return true;
         }
     }
