@@ -188,8 +188,8 @@ QString UpdateDialog::writeBat(const QString& sourceDir, const QString& targetDi
     bat += "@del \"%~f0\"";
     QFile file(appDir + "/copy.bat");
     if (file.open(QFile::WriteOnly)) {
-        const QByteArray data = bat.toLocal8Bit(); // 系统代码页（中文=GBK），cmd 按此解析
-        if (file.write(data) != data.size())
+        const QByteArray batData = bat.toLocal8Bit(); // 系统代码页（中文=GBK），cmd 按此解析
+        if (file.write(batData) != batData.size())
             qWarning() << "Failed to write bat file:" << file.fileName();
     }
     return file.fileName();
