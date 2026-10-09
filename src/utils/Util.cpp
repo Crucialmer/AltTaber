@@ -776,4 +776,10 @@ namespace Util {
             }
         });
     }
+
+    void disarmClickShield() {
+        g_clickShield.armed = false;
+        g_clickShield.pendingRelease = false;
+        QTimer::singleShot(0, unhookClickShield); // 回事件循环后安全卸载
+    }
 } // Util

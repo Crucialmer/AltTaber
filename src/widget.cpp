@@ -56,9 +56,20 @@ Widget::Widget(QWidget* parent) : QWidget(parent), ui(new Ui::Widget) {
     // will not take ownership of delegate
     lw->setItemDelegate(new IconOnlyDelegate(lw));
     lw->installEventFilter(this);
+    // 鼠标事件实际投递给列表的 viewport（不是 QListWidget 本身，QAbstractScrollArea 子类的经典坑）——
+    // 必须同时装在 viewport 上，否则点击图标的按下事件会被列表默认处理消费，过滤器收不到（单击切换失效的根因）
+    lw->viewport()->installEventFilter(this);
 
     connect(lw, &QListWidget::currentItemChanged, this, [this](QListWidgetItem* cur, QListWidgetItem*) {
         if (cur) showLabelForItem(cur);
+    });
+
+    // 单击切换的兜底路径：若某环境下过滤器仍未截获按下事件（由列表默认处理消费），
+    // itemPressed 信号依然会带条目命中信息（pressed 时鼠标左键须处于按下态，以排除右键等其它按键）。
+    // 正常路径（过滤器已消费事件）不会触发本信号，因此不会双发
+    connect(lw, &QListWidget::itemPressed, this, [this](QListWidgetItem* item) {
+        if (QApplication::mouseButtons() & Qt::LeftButton)
+            handleIconClick(item);
     });
 
     connect(qApp, &QApplication::focusWindowChanged, this, [this](QWindow* focusWindow) {
@@ -300,6 +311,8 @@ QList<WindowGroup> Widget::prepareWindowGroupList() {
 }
 
 bool Widget::prepareListWidget() {
+    // 新一轮弹窗交互开始：解除上一轮遗留的"双击屏蔽"（若有），避免其吞掉本轮在同一位置的第一次点击
+    Util::disarmClickShield();
     auto winGroupList = prepareWindowGroupList();
     lw->clear();
     for (auto& winGroup: winGroupList) {
@@ -412,6 +425,16 @@ void Widget::requestShowPinned() {
     forceShow();
 }
 
+/// 单击图标：选中目标并立即切换（鼠标确认路径；事件过滤器与 pressed 信号兜底共用）
+void Widget::handleIconClick(QListWidgetItem* item) {
+    if (!this->isVisible()) return;
+    if (lw->currentItem() != item)
+        lw->setCurrentItem(item); // 供 switchToCurrentItem 取目标
+    Util::armClickShield(QGuiApplication::styleHints()->mouseDoubleClickInterval() + 100);
+    qInfo() << "Click switch -> row" << lw->row(item);
+    switchToCurrentItem(); // 立即切换并隐藏
+}
+
 /// 切换到当前选中项对应的窗口并隐藏（Alt 释放与 pinned 确认共用路径）
 void Widget::switchToCurrentItem() {
     if (auto item = lw->currentItem()) {
@@ -488,16 +511,15 @@ QList<HWND> Widget::buildGroupWindowOrder(const QString& exePath) {
 }
 
 bool Widget::eventFilter(QObject* watched, QEvent* event) {
-    if (watched == lw && event->type() == QEvent::MouseButtonPress) {
+    if ((watched == lw || watched == lw->viewport()) && event->type() == QEvent::MouseButtonPress) {
         // 单击=直接切换（用户裁决；双击效果已废除）：左键点在图标上即切换并隐藏。
+        // 接收者可能是 listWidget 或其 viewport（鼠标事件的实际接收者是后者）；
+        // 坐标统一用屏幕坐标映射回 viewport 坐标系，不依赖事件来自哪个对象
         // 双击的第二下由"点击屏蔽"吞掉（Util::armClickShield），避免其落到切换后的窗口上造成误触
         auto* me = static_cast<QMouseEvent*>(event);
         if (this->isVisible() && me->button() == Qt::LeftButton) {
-            if (auto* item = lw->itemAt(me->position().toPoint())) {
-                if (lw->currentItem() != item)
-                    lw->setCurrentItem(item); // 供 switchToCurrentItem 取目标
-                Util::armClickShield(QGuiApplication::styleHints()->mouseDoubleClickInterval() + 100);
-                switchToCurrentItem(); // 立即切换并隐藏
+            if (auto* item = lw->itemAt(lw->viewport()->mapFromGlobal(me->globalPosition().toPoint()))) {
+                handleIconClick(item);
                 return true; // 消费本次按下
             }
         }

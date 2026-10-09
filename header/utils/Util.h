@@ -29,6 +29,8 @@ namespace Util {
     /// 布防“双击屏蔽”：msecs 内吞掉与当前光标位置（物理坐标，±6px）同点的下一次鼠标左键按下/释放。
     /// 用于“单击即切换”后，废掉双击的第二下，避免其落到切换后的窗口上造成误触
     void armClickShield(int msecs);
+    /// 解除“双击屏蔽”（弹窗每次打开时调用：新一轮交互的点击不得被上一轮的屏蔽误吞）
+    void disarmClickShield();
     QPixmap getWindowIcon(HWND hwnd);
     bool setWindowRoundCorner(HWND hwnd, DWM_WINDOW_CORNER_PREFERENCE pvAttribute = DWMWCP_ROUND);
     bool isKeyPressed(int vkey);

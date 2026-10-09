@@ -80,6 +80,8 @@ private:
     bool forceShow();
     /// 执行"切换到当前选中项"并隐藏（Alt释放与pinned确认共用）
     void switchToCurrentItem();
+    /// 单击图标：选中并立即切换（鼠标确认路径；事件过滤器与 pressed 信号兜底共用）
+    void handleIconClick(QListWidgetItem* item);
     /// 循环选择（forward=true 下一个 / false 上一个）
     void cycleSelection(bool forward);
     void showLabelForItem(QListWidgetItem* item, QString text = QString());
