@@ -26,6 +26,9 @@ namespace Util {
     QIcon getJumboIcon(const QString& filePath);
     QIcon getCachedIcon(const QString& path, HWND hwnd);
     void startIconPrefetch(); // 后台图标预取：工作线程提前提取图标，避免弹窗时首次同步等待
+    /// 布防“双击屏蔽”：msecs 内吞掉与 pos（屏幕坐标，±6px）同位置的下一次鼠标左键按下/释放。
+    /// 用于“单击即切换”后，废掉双击的第二下，避免其落到切换后的窗口上造成误触
+    void armClickShield(POINT pos, int msecs);
     QPixmap getWindowIcon(HWND hwnd);
     bool setWindowRoundCorner(HWND hwnd, DWM_WINDOW_CORNER_PREFERENCE pvAttribute = DWMWCP_ROUND);
     bool isKeyPressed(int vkey);

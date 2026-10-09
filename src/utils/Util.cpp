@@ -712,4 +712,64 @@ namespace Util {
         auto className = Util::getClassName(hwnd);
         return className == QStringLiteral("Shell_TrayWnd") || className == QStringLiteral("Shell_SecondaryTrayWnd"); // 副屏
     }
+
+    // ----------------- 双击屏蔽（单击即切换后，吞掉双击的第二下） -----------------
+    namespace {
+        HHOOK g_clickShieldHook = nullptr;
+        struct ClickShield {
+            bool armed = false;
+            POINT pos{};
+            ULONGLONG untilMs = 0;
+            bool pendingRelease = false; // 已吞下该次按下，连带吞掉其释放
+        } g_clickShield;
+
+        void unhookClickShield() {
+            if (g_clickShieldHook) {
+                UnhookWindowsHookEx(g_clickShieldHook);
+                g_clickShieldHook = nullptr;
+            }
+        }
+
+        LRESULT CALLBACK clickShieldProc(int nCode, WPARAM wParam, LPARAM lParam) {
+            if (nCode == HC_ACTION && g_clickShield.armed) {
+                if (GetTickCount64() > g_clickShield.untilMs) {
+                    g_clickShield.armed = false;
+                    g_clickShield.pendingRelease = false;
+                    QTimer::singleShot(0, unhookClickShield); // 回事件循环后安全卸载
+                } else if (wParam == WM_LBUTTONDOWN) {
+                    auto* d = reinterpret_cast<MSLLHOOKSTRUCT*>(lParam);
+                    if (qAbs(d->pt.x - g_clickShield.pos.x) <= 6 && qAbs(d->pt.y - g_clickShield.pos.y) <= 6) {
+                        g_clickShield.pendingRelease = true;
+                        return 1; // 吞掉双击的第二下
+                    }
+                    g_clickShield.armed = false; // 位置不同：视为新的点击意图，解除屏蔽
+                } else if (wParam == WM_LBUTTONUP && g_clickShield.pendingRelease) {
+                    g_clickShield.pendingRelease = false;
+                    g_clickShield.armed = false;
+                    QTimer::singleShot(0, unhookClickShield);
+                    return 1; // 连带吞掉对应的释放
+                }
+            }
+            return CallNextHookEx(nullptr, nCode, wParam, lParam);
+        }
+    } // anonymous namespace
+
+    void armClickShield(POINT pos, int msecs) {
+        g_clickShield.armed = true;
+        g_clickShield.pos = pos;
+        g_clickShield.untilMs = GetTickCount64() + msecs;
+        g_clickShield.pendingRelease = false;
+        if (!g_clickShieldHook)
+            g_clickShieldHook = SetWindowsHookEx(WH_MOUSE_LL, (HOOKPROC) clickShieldProc, GetModuleHandle(nullptr), 0);
+        if (!g_clickShieldHook)
+            qWarning() << "Failed to install click shield hook";
+        // 兜底卸载（期间没有后续点击时）
+        QTimer::singleShot(msecs + 200, [] {
+            if (!g_clickShield.armed || GetTickCount64() > g_clickShield.untilMs) {
+                g_clickShield.armed = false;
+                g_clickShield.pendingRelease = false;
+                unhookClickShield();
+            }
+        });
+    }
 } // Util
