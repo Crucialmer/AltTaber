@@ -38,7 +38,8 @@ LRESULT keyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     qDebug() << "Alt+Tab detected!";
                     if ((HWND) Hooker::receiver->winId() != GetForegroundWindow()) { // not Foreground
                         // 异步，防止阻塞；超过1s会导致被系统强制绕过，传递给下一个钩子
-                        QMetaObject::invokeMethod(Hooker::receiver, "requestShow", Qt::QueuedConnection);
+                        // 方案A：Alt+Tab 也走 pinned 模式——松开 Alt 后切换器保持显示，Enter/空格/点击确认，Esc 取消
+                        QMetaObject::invokeMethod(Hooker::receiver, "requestShowPinned", Qt::QueuedConnection);
                     } else {
                         // 转发Alt+Tab给Widget
                         auto shiftModifier = Util::isKeyPressed(VK_SHIFT) ? Qt::ShiftModifier : Qt::NoModifier;

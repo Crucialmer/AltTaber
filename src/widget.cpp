@@ -104,7 +104,17 @@ void Widget::keyPressEvent(QKeyEvent* event) {
         // weird formula, but works (hhh)
         auto index = (i - (2 * isShiftPressed - 1) + lw->count()) % lw->count();
         lw->setCurrentRow(index);
-    } else if (key == Qt::Key_QuoteLeft && (modifiers & Qt::AltModifier)) { // Alt + `, 在前台窗口同组窗口内切换
+    } else if (key == Qt::Key_QuoteLeft && this->isVisible()) {
+        // 弹出器显示中：`（Tab 上方键）= 向左循环选择（与 Tab 向右对称）；Shift+` 向右
+        // 注意：此分支在 Alt+` 同应用轮换分支之前——弹出器可见时 ` 键优先用于列表选择，
+        // Alt+` 的同应用窗口轮换仅在弹出器不可见时生效（原语义保留）
+        if (lw->count() == 0) return QWidget::keyPressEvent(event);
+        const int N = lw->count();
+        const int i = lw->currentRow();
+        const bool isShiftPressed = (modifiers & Qt::ShiftModifier);
+        auto index = (i + (isShiftPressed ? 1 : -1) + N) % N;
+        lw->setCurrentRow(index);
+    } else if (key == Qt::Key_QuoteLeft && (modifiers & Qt::AltModifier)) { // Alt + `, 在前台窗口同组窗口间切换（弹出器不可见时）
         if (this->isVisible() && !this->isMinimized()) {
             // isVisible() == true if minimized
             // 不使用`isForeground()`，即使`bringWindowToTop`(without active)，少数窗口也可能抢夺焦点，如`CAJViewer`
@@ -197,14 +207,10 @@ void Widget::setupLabelFont() {
 void Widget::keyReleaseEvent(QKeyEvent* event) {
     if (event->key() == Qt::Key_Alt) {
         groupWindowOrder.clear(); // for Alt + `
-        if (pinned) {
-            // Ctrl+Alt+Tab pinned 模式：Alt 释放不触发切换，保持显示等待 Enter/Esc/点击
-            QWidget::keyReleaseEvent(event);
-            return;
-        }
-        if (this->isVisible()) {
-            switchToCurrentItem();
-        }
+        // 方案A：Alt+Tab 呼出后一律 pinned——松开 Alt 不触发切换，保持显示，
+        // 由 Enter/空格/双击确认、Esc 取消、失焦自动取消
+        QWidget::keyReleaseEvent(event);
+        return;
     }
     QWidget::keyReleaseEvent(event);
 }
@@ -373,12 +379,17 @@ bool Widget::requestShow() { // TODO 当前台是开始菜单（Win）时，会�
     return prepareListWidget() && forceShow();
 }
 
-/// Ctrl+Alt+Tab：呼出后保持显示（pinned），不随 Alt 释放而切换/隐藏
-/// 期间可用 Tab/方向键/Vim 键选择，Enter/点击 确认切换，Esc 取消
+/// pinned 模式呼出：松开按键后保持显示，不随 Alt 释放而切换/隐藏
+/// 期间可用 Tab/`/方向键/Vim 键选择，Enter/空格/点击 确认切换，Esc 取消
+/// 方案A：Alt+Tab 与 Ctrl+Alt+Tab 均走此路径
 void Widget::requestShowPinned() {
     if (pinned && this->isVisible()) {
-        // 已在 pinned 显示中，再按 Ctrl+Alt+Tab 视为确认切换（与 Windows 原生行为一致）
-        switchToCurrentItem();
+        // 已在 pinned 显示中：重复触发不确认（钩子已对自动重复去重，这里防御），
+        // 刷新列表继续选择
+        if (!prepareListWidget()) {
+            pinned = false;
+            return;
+        }
         return;
     }
     pinned = true;
@@ -472,6 +483,12 @@ bool Widget::eventFilter(QObject* watched, QEvent* event) {
         if (pinned && this->isVisible() && key == Qt::Key_Escape) {
             pinned = false;
             hide();
+            return true;
+        }
+        // 真实 Tab 按键（Alt 已松开、pinned 显示中）会被列表控件作为焦点导航消费，
+        // 不会冒泡到 Widget::keyPressEvent——在此拦截并重派发，保证 Tab=向右循环
+        if (this->isVisible() && (key == Qt::Key_Tab || key == Qt::Key_Backtab)) {
+            QApplication::sendEvent(this, event);
             return true;
         }
     }
