@@ -1,5 +1,5 @@
 ﻿cmake_minimum_required(VERSION 3.21)
-project(Win_Switcher)
+project(Win_Switcher VERSION 0.5.1)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -9,10 +9,14 @@ set(CMAKE_AUTOUIC ON)
 # 不硬编码 Qt 路径，改由命令行 -DCMAKE_PREFIX_PATH= 或环境变量传入
 list(APPEND CMAKE_AUTOUIC_SEARCH_PATHS ui) # 如果.ui文件不在.cpp同一目录下，需要添加搜索路径
 
-# 设置版本信息变量
-set(VERSION_MAJOR 0)
-set(VERSION_MINOR 5)
-set(VERSION_PATCH 0)
+# 版本信息统一来自 project() 声明（applicationVersion 也由此注入）
+set(VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
+set(VERSION_MINOR ${PROJECT_VERSION_MINOR})
+set(VERSION_PATCH ${PROJECT_VERSION_PATCH})
+# 注入 QApplication::applicationVersion()（UpdateDialog 更新检查依赖）
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+        APP_VERSION="${PROJECT_VERSION}"
+)
 
 set(COMPANY_NAME "MrBeanCpp")
 set(FILE_DESCRIPTION "AltTaber - Window Switcher")

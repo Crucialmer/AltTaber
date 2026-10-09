@@ -16,6 +16,9 @@
 
 int main(int argc, char* argv[]) {
     QApplication a(argc, argv);
+#ifdef APP_VERSION
+    QApplication::setApplicationVersion(QStringLiteral(APP_VERSION)); // UpdateDialog 更新检查依赖
+#endif
     SingleApp singleApp("AltTaber-MrBeanCpp");
     if (singleApp.isRunning()) {
         qWarning() << "Another instance is running! Exit";

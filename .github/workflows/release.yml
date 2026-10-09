@@ -1,0 +1,76 @@
+name: Build & Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch: # 允许手动触发（测试构建，不发布 Release）
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write # 创建 Release 所需
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install Qt (6.8.x, MSVC 2022 x64)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.*'
+          arch: win64_msvc2022_64
+          cache: true
+
+      - name: Configure (CMake)
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Locate exe
+        id: exe
+        shell: pwsh
+        run: |
+          # 多配置生成器（VS）产物在 build/Release/ 下
+          $exe = Get-ChildItem -Path build -Recurse -Filter AltTaber.exe | Select-Object -First 1
+          if (-not $exe) { throw "AltTaber.exe not found" }
+          echo "path=$($exe.DirectoryName)" >> $env:GITHUB_OUTPUT
+          echo "Exe at: $($exe.FullName)"
+
+      - name: Deploy Qt runtime (windeployqt)
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path build -Recurse -Filter AltTaber.exe | Select-Object -First 1
+          windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw --compiler-runtime $exe.FullName
+
+      - name: Package (zip)
+        id: pkg
+        shell: pwsh
+        run: |
+          $dir = "${{ steps.exe.outputs.path }}"
+          $ver = "${{ github.ref_name }}"
+          if ($ver -eq "" -or $ver -like "refs/*") { $ver = "manual-${{ github.run_number }}" }
+          $zipName = "AltTaber-$ver-win64.zip"
+          Compress-Archive -Path "$dir\*" -DestinationPath $zipName
+          echo "name=$zipName" >> $env:GITHUB_OUTPUT
+          echo "Packaged: $zipName ($((Get-Item $zipName).Length / 1MB) MB)"
+
+      - name: Upload artifact (always, incl. manual runs)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.pkg.outputs.name }}
+          path: ${{ steps.pkg.outputs.name }}
+
+      - name: Create GitHub Release (tag push only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: AltTaber ${{ github.ref_name }}
+          generate_release_notes: true
+          files: ${{ steps.pkg.outputs.name }}
