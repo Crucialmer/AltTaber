@@ -418,7 +418,7 @@ namespace Util {
 
         // 48x48 icons, use SHIL_EXTRALARGE
         // 256x256 icons (after Vista), use SHIL_JUMBO
-        IImageList* imageList;
+        IImageList* imageList = nullptr; // 初始化：失败时避免 Release 野指针
         HRESULT hResult = SHGetImageList(SHIL_JUMBO, IID_IImageList, (void**) &imageList);
 
         QIcon icon;
@@ -431,7 +431,8 @@ namespace Util {
                 DestroyIcon(hIcon); // GetIcon 返回的句柄需显式销毁；原代码误销毁了 sfi.hIcon（SHGFI_SYSICONINDEX 模式下该字段无效）
             }
         }
-        imageList->Release();
+        if (imageList)
+            imageList->Release(); // 失败时 imageList 为 nullptr，跳过
         return icon;
     }
 

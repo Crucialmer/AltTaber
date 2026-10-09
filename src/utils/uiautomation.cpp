@@ -44,21 +44,26 @@ UIElement UIAutomation::getParentWithHWND(const UIElement& element) {
         qWarning() << "UIAutomation not initialized in getParentWithHWND";
         return {};
     }
-    IUIAutomationElement* pParent = nullptr;
+    IUIAutomationElement* pResult = nullptr;
     IUIAutomationElement* pElement = element.inner();
     IUIAutomationTreeWalker* pTreeWalker = nullptr;
     if (SUCCEEDED(pAutomation->get_ControlViewWalker(&pTreeWalker))) {
         UIA_HWND hwnd = nullptr;
         do {
+            IUIAutomationElement* pParent = nullptr;
             if (FAILED(pTreeWalker->GetParentElement(pElement, &pParent)) || !pParent)
-                break; // 已到桌面根或失败，pParent 为 nullptr
+                break; // 已到桌面根或失败
             if (FAILED(pParent->get_CurrentNativeWindowHandle(&hwnd)))
                 hwnd = nullptr; // 失败时重置，避免读未初始化值
-            pElement = pParent; // 注意：pElement 由调用方持有，不 Release；pParent 所有权在下轮循环转移
+            if (pResult)
+                pResult->Release(); // 释放上一轮的中间父元素（它只是路径节点，不返回）
+            pResult = pParent;
+            pElement = pParent;
         } while (pElement && !hwnd);
         pTreeWalker->Release();
     }
-    return UIElement{pParent}; // 若循环未执行或失败，pParent 为 nullptr，UIElement 安全处理
+    // pResult 的所有权移交给返回的 UIElement（析构时 Release）；中途 break 时也是当前持有者
+    return UIElement{pResult};
 }
 
 void UIAutomation::cleanup() {

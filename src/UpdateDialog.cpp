@@ -84,6 +84,7 @@ void UpdateDialog::fetchGithubReleaseInfo() {
         relInfo.publishTime = toLocalTime(obj["published_at"].toString());
 
         if (const auto assets = obj["assets"].toArray(); !assets.isEmpty()) {
+            relInfo.downloadUrl.clear(); // 先清空，防止上次请求的残留值在“assets 全非 zip”时被误用
             // 筛选 zip asset，避免取到非压缩包或顺序不确定导致错误下载
             for (const auto& asset: assets) {
                 const auto name = asset["name"].toString();

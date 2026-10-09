@@ -3,7 +3,7 @@
 
 #include <QSettings>
 #include <QApplication>
-#include <QFileInfo>
+#include <QTemporaryFile>
 #include <QStandardPaths>
 #include <QDir>
 #include "ConfigManagerBase.h"
@@ -26,16 +26,20 @@ public:
 
     static ConfigManager& instance() {
         static const auto filePath = [] {
-            const auto dirPath = QApplication::applicationDirPath() + "/" + FileName;
-            // 若应用目录不可写（如 Program Files），回退到用户 AppData，避免配置静默丢失
-            QFileInfo dirInfo(QApplication::applicationDirPath());
-            if (!dirInfo.isWritable()) {
+            // 注意：QFileInfo::isWritable() 在 Windows 上默认只检查 READONLY 属性（NTFS ACL 检查需
+            // 启用 qt_ntfs_permission_lookup，默认关闭），对 Program Files 会误报可写。
+            // 因此这里用"实测写临时文件"来判断目录是否真的可写。
+            const auto appDir = QApplication::applicationDirPath();
+            QTemporaryFile probe(appDir + "/.writable_probe_XXXXXX.tmp");
+            const bool writable = probe.open();
+            probe.remove(); // QTemporaryFile 析构会自动删除，这里显式删除以保险
+            if (!writable) {
                 qWarning() << "Application dir not writable, config fallback to AppData";
                 const auto appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
                 QDir().mkpath(appData);
                 return appData + "/" + FileName;
             }
-            return dirPath;
+            return appDir + "/" + FileName;
         }();
         static ConfigManager instance{filePath}; // multiple threads safe
         return instance;

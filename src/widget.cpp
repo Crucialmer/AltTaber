@@ -13,6 +13,7 @@
 #include <QWheelEvent>
 #include <QTimer>
 #include <QMetaEnum>
+#include <QSet>
 #include "utils/SystemTray.h"
 #include "utils/ConfigManager.h"
 
