@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QApplication>
 #include <QDebug>
+#include <QDateTime>
 #include <QMessageBox>
 #include <shlobj_core.h>
 
@@ -21,6 +22,27 @@ class Startup {
 public:
     Startup() = delete;
     friend class SystemTray;
+
+    /// 状态查询（带缓存）：schtask 查询需 fork 子进程（10ms~秒级），
+    /// 托盘菜单 aboutToShow 等高频调用点不应阻塞 GUI 线程。
+    /// 缓存策略：结果缓存 5 秒；任何 on()/off() 写操作后立即失效。
+    static bool isOn(bool refresh = false) {
+#ifdef HAS_SCHTASK
+        static qint64 lastQueryMs = 0;
+        static bool cachedIsOn = false;
+        static bool hasCache = false;
+        const auto now = QDateTime::currentMSecsSinceEpoch();
+        if (refresh || !hasCache || now - lastQueryMs > 5000) {
+            cachedIsOn = isOn_reg() || ScheduledTask::queryTask(SCHTASK_NAME);
+            lastQueryMs = now;
+            hasCache = true;
+        }
+        return cachedIsOn;
+#else
+        Q_UNUSED(refresh);
+        return isOn_reg();
+#endif
+    }
 
     static void on() {
 #ifdef HAS_SCHTASK
@@ -41,6 +63,7 @@ public:
 #else
         on_reg();
 #endif
+        invalidateCache();
     }
 
     static void off() {
@@ -57,6 +80,7 @@ public:
             }
         }
 #endif
+        invalidateCache();
     }
 
     static void toggle() {
@@ -67,17 +91,18 @@ public:
         _on ? on() : off();
     }
 
-    static bool isOn() {
-#ifdef HAS_SCHTASK
-        return isOn_reg() || ScheduledTask::queryTask(SCHTASK_NAME);
-#else
-        return isOn_reg();
-#endif
-    }
-
 private:
     static QString applicationPath() {
         return QDir::toNativeSeparators(QApplication::applicationFilePath());
+    }
+
+    /// 使 isOn() 缓存失效（写操作后调用，确保下次查询反映最新状态）
+    static void invalidateCache() {
+#ifdef HAS_SCHTASK
+        isOn(true); // 强制刷新并重建缓存
+#else
+        // 无 schtask 时 isOn() 直查注册表，无缓存，无需处理
+#endif
     }
 
     static void on_reg() {

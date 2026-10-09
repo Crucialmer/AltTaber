@@ -6,6 +6,7 @@
 #include <QMenu>
 #include <QSystemTrayIcon>
 #include <QActionGroup>
+#include <QTimer>
 #include "Startup.h"
 #include "ConfigManager.h"
 #include "UpdateDialog.h"
@@ -28,6 +29,8 @@ private:
         setIcon(QIcon(":/img/icon.ico"));
         setMenu(parent);
         setToolTip(IsUserAnAdmin() ? "AltTaber (admin)" : "AltTaber");
+        // 启动后延迟预热 Startup 缓存，首次弹出托盘菜单不再同步等 schtasks 子进程
+        QTimer::singleShot(3000, this, [] { Startup::isOn(true); });
     }
 
     void setMenu(QWidget* parent = nullptr) {
@@ -64,14 +67,14 @@ private:
         // triggered vs toggled: setChecked() will emit `toggled`, but not `triggered` (which is pure user action)
         connect(act_startup, &QAction::triggered, this, [this](bool checked) {
             Startup::toggle();
-            if (Startup::isOn() == checked)
+            if (Startup::isOn() == checked) // toggle 后缓存已重建（invalidateCache），此处直读缓存不阻塞
                 this->showMessage("auto Startup mode", checked ? "ON √" : "OFF ×");
             else
                 this->showMessage("Action Failed", "Failed to change Startup mode", Warning);
         });
-        // aboutToShow 时查询，反映真实状态
+        // aboutToShow 时查询，反映真实状态（isOn 带 5s 缓存 + 启动时预热，菜单弹出不再等 schtasks 子进程）
         connect(menu, &QMenu::aboutToShow, act_startup, [act_startup] {
-            act_startup->setChecked(Startup::isOn()); // 10-30ms
+            act_startup->setChecked(Startup::isOn());
 
             static auto text = act_startup->text();
             if (IsUserAnAdmin() && !Startup::isOn_reg())
