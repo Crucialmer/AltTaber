@@ -64,6 +64,7 @@ public:
     QList<WindowGroup> prepareWindowGroupList();
     bool prepareListWidget();
     Q_INVOKABLE bool requestShow();
+    Q_INVOKABLE void requestShowPinned(); // Ctrl+Alt+Tab：松开按键后保持显示，Enter/点击确认，Esc 取消
     void notifyForegroundChanged(HWND hwnd, ForegroundChangeSource source);
 
     HWND hWnd() { return (HWND) winId(); }
@@ -77,6 +78,8 @@ public:
 
 private:
     bool forceShow();
+    /// 执行"切换到当前选中项"并隐藏（Alt释放与pinned确认共用）
+    void switchToCurrentItem();
     void showLabelForItem(QListWidgetItem* item, QString text = QString());
     void setupLabelFont();
     auto getLastActiveGroupWindow(const QString& exePath) -> QPair<HWND, QDateTime>;
@@ -103,6 +106,8 @@ private:
     QString taskbarLastPath;
     HWND taskbarLastHwnd = nullptr;
     bool isLastTaskbarForward = true;
+    // Ctrl+Alt+Tab pinned 模式：松开按键后保持显示，Enter/点击确认，Esc 取消
+    bool pinned = false;
 };
 
 

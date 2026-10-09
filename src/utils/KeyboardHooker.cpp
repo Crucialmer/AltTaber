@@ -21,6 +21,13 @@ LRESULT keyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
 
             if (isAltPressed && Hooker::receiver) {
                 if (pKeyBoard->vkCode == VK_TAB) {
+                    bool isCtrlPressed = Util::isKeyPressed(VK_CONTROL);
+                    if (isCtrlPressed) {
+                        // Ctrl+Alt+Tab：松手后切换器保持显示（pinned），Enter/点击确认，Esc 取消
+                        qDebug() << "Ctrl+Alt+Tab detected!";
+                        QMetaObject::invokeMethod(Hooker::receiver, "requestShowPinned", Qt::QueuedConnection);
+                        return 1; // 阻止事件传递（拦截系统的 Ctrl+Alt+Tab 固定切换器）
+                    }
                     qDebug() << "Alt+Tab detected!";
                     if ((HWND) Hooker::receiver->winId() != GetForegroundWindow()) { // not Foreground
                         // 异步，防止阻塞；超过1s会导致被系统强制绕过，传递给下一个钩子

@@ -61,9 +61,10 @@ Widget::Widget(QWidget* parent) : QWidget(parent), ui(new Ui::Widget) {
 
     connect(qApp, &QApplication::focusWindowChanged, this, [this](QWindow* focusWindow) {
         if (focusWindow == nullptr) {
-            if (!this->underMouse()) // hide when lost focus & mouse outside (means user choose to)
+            if (!this->underMouse()) { // hide when lost focus & mouse outside (means user choose to)
+                pinned = false; // 非 Enter 确认路径的隐藏都视为取消
                 hide();
-            else { // Windows Terminal will do
+            } else { // Windows Terminal will do
                 qWarning() << "Someone tried to steal focus!";
             }
         }
@@ -83,7 +84,20 @@ void Widget::keyPressEvent(QKeyEvent* event) {
         {Qt::Key_H, Qt::Key_Left},  // ←
         {Qt::Key_L, Qt::Key_Right}, // →
     };
-    if (key == Qt::Key_Tab) { // switch to next or prev
+    if (key == Qt::Key_Return || key == Qt::Key_Enter) {
+        // pinned 模式下 Enter 确认切换；非 pinned 时 Alt 还按着，Enter 交由默认处理
+        if (pinned && this->isVisible()) {
+            switchToCurrentItem();
+            return;
+        }
+    } else if (key == Qt::Key_Escape) {
+        // pinned 模式下 Esc 取消（不切换，直接隐藏）
+        if (pinned && this->isVisible()) {
+            pinned = false;
+            hide();
+            return;
+        }
+    } else if (key == Qt::Key_Tab) { // switch to next or prev
         if (lw->count() == 0) return QWidget::keyPressEvent(event);
         auto i = lw->currentRow();
         bool isShiftPressed = (modifiers & Qt::ShiftModifier);
@@ -183,25 +197,13 @@ void Widget::setupLabelFont() {
 void Widget::keyReleaseEvent(QKeyEvent* event) {
     if (event->key() == Qt::Key_Alt) {
         groupWindowOrder.clear(); // for Alt + `
+        if (pinned) {
+            // Ctrl+Alt+Tab pinned 模式：Alt 释放不触发切换，保持显示等待 Enter/Esc/点击
+            QWidget::keyReleaseEvent(event);
+            return;
+        }
         if (this->isVisible()) {
-            // active selected window
-            if (auto item = lw->currentItem()) {
-                if (auto group = item->data(Qt::UserRole).value<WindowGroup>(); !group.windows.empty()) {
-                    WindowInfo targetWin = group.windows.at(0); // TODO 需要排序（lastActiveWindow 被关闭情况下）
-                    const auto lastActive = getLastActiveGroupWindow(group.exePath).first;
-                    for (auto& info: group.windows) {
-                        if (info.hwnd == lastActive) {
-                            targetWin = info;
-                            break;
-                        }
-                    }
-                    if (targetWin.hwnd) {
-                        Util::switchToWindow(targetWin.hwnd);
-                        qInfo() << "Switch to" << targetWin << group.exePath;
-                    }
-                }
-            }
-            hide(); //! must hide after active target window, or focus may fallback to prev foreground window (like 网易云音乐)
+            switchToCurrentItem();
         }
     }
     QWidget::keyReleaseEvent(event);
@@ -367,7 +369,45 @@ bool Widget::prepareListWidget() {
 }
 
 bool Widget::requestShow() { // TODO 当前台是开始菜单（Win）时，会导致显示 但无法操控
+    pinned = false;
     return prepareListWidget() && forceShow();
+}
+
+/// Ctrl+Alt+Tab：呼出后保持显示（pinned），不随 Alt 释放而切换/隐藏
+/// 期间可用 Tab/方向键/Vim 键选择，Enter/点击 确认切换，Esc 取消
+void Widget::requestShowPinned() {
+    if (pinned && this->isVisible()) {
+        // 已在 pinned 显示中，再按 Ctrl+Alt+Tab 视为确认切换（与 Windows 原生行为一致）
+        switchToCurrentItem();
+        return;
+    }
+    pinned = true;
+    if (!prepareListWidget()) {
+        pinned = false;
+        return;
+    }
+    forceShow();
+}
+
+/// 切换到当前选中项对应的窗口并隐藏（Alt 释放与 pinned 确认共用路径）
+void Widget::switchToCurrentItem() {
+    if (auto item = lw->currentItem()) {
+        if (auto group = item->data(Qt::UserRole).value<WindowGroup>(); !group.windows.empty()) {
+            WindowInfo targetWin = group.windows.at(0); // TODO 需要排序（lastActiveWindow 被关闭情况下）
+            const auto lastActive = getLastActiveGroupWindow(group.exePath).first;
+            for (auto& info: group.windows) {
+                if (info.hwnd == lastActive) {
+                    targetWin = info;
+                    break;
+                }
+            }
+            if (targetWin.hwnd) {
+                Util::switchToWindow(targetWin.hwnd);
+                qInfo() << "Switch to" << targetWin << group.exePath;
+            }
+        }
+    }
+    hide(); //! must hide after active target window, or focus may fallback to prev foreground window (like 网易云音乐)
 }
 
 /// Warning: the `HWND` not guarantee to be valid (may be closed)
@@ -414,6 +454,13 @@ QList<HWND> Widget::buildGroupWindowOrder(const QString& exePath) {
 }
 
 bool Widget::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == lw && event->type() == QEvent::MouseButtonDblClick) {
+        // pinned 模式下双击确认切换（单击仍用于选择）
+        if (pinned && this->isVisible()) {
+            switchToCurrentItem();
+            return true;
+        }
+    }
     if (watched == lw && event->type() == QEvent::Wheel) {
         auto* wheelEvent = static_cast<QWheelEvent*>(event);
         auto cursorPos = wheelEvent->position().toPoint();
