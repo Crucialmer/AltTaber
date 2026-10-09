@@ -754,7 +754,9 @@ namespace Util {
         }
     } // anonymous namespace
 
-    void armClickShield(POINT pos, int msecs) {
+    void armClickShield(int msecs) {
+        POINT pos{}; // 物理屏幕坐标：与低级钩子 MSLLHOOKSTRUCT.pt 同一坐标系（勿用 Qt 逻辑坐标，缩放≠100% 时对不上）
+        GetCursorPos(&pos); // 布防时（点击刚发生）光标就在点击位置
         g_clickShield.armed = true;
         g_clickShield.pos = pos;
         g_clickShield.untilMs = GetTickCount64() + msecs;

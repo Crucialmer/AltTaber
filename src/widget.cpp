@@ -495,7 +495,7 @@ bool Widget::eventFilter(QObject* watched, QEvent* event) {
             if (auto* item = lw->itemAt(me->position().toPoint())) {
                 if (lw->currentItem() != item)
                     lw->setCurrentItem(item); // 供 switchToCurrentItem 取目标
-                Util::armClickShield(me->globalPosition().toPoint(), QGuiApplication::styleHints()->mouseDoubleClickInterval() + 100);
+                Util::armClickShield(QGuiApplication::styleHints()->mouseDoubleClickInterval() + 100);
                 switchToCurrentItem(); // 立即切换并隐藏
                 return true; // 消费本次按下
             }
