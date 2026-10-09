@@ -748,6 +748,8 @@ namespace Util {
                     g_clickShield.armed = false;
                     QTimer::singleShot(0, unhookClickShield);
                     return 1; // 连带吞掉对应的释放
+                } else if (wParam == WM_RBUTTONDOWN || wParam == WM_MBUTTONDOWN || wParam == WM_XBUTTONDOWN) {
+                    g_clickShield.armed = false; // 其它按键按下 = 新的操作意图，解除屏蔽
                 }
             }
             return CallNextHookEx(nullptr, nCode, wParam, lParam);

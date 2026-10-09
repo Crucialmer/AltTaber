@@ -12,6 +12,7 @@
 #include "utils/QtWin.h"
 #include <QWheelEvent>
 #include <QMouseEvent>
+#include <QStyleHints>
 #include <QTimer>
 #include <QMetaEnum>
 #include <QSet>
