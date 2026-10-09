@@ -21,6 +21,7 @@ public:
 
     void set(QAnyStringView key, const QVariant& value) {
         settings.setValue(key, value);
+        settings.sync(); // 立即刷盘，避免崩溃丢失最近修改（对自启动等关键设置尤其重要）
     }
 
     void remove(QAnyStringView key) {

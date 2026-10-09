@@ -93,6 +93,16 @@ private:
     /// exePath -> (HWND, time)
     QHash<QString, QHash<HWND, QDateTime>> winActiveOrder;
     QList<HWND> groupWindowOrder; // for Alt+` 同组窗口切换
+
+    // --- 状态：替代原函数内 static（跨调用存活、存在悬垂/污染风险）---
+    // eventFilter 滚轮换窗状态
+    QListWidgetItem* wheelLastItem = nullptr;
+    HWND wheelHwnd = nullptr;
+    bool isLastWheelRollUp = true;
+    // rotateTaskbarWindowInGroup 状态
+    QString taskbarLastPath;
+    HWND taskbarLastHwnd = nullptr;
+    bool isLastTaskbarForward = true;
 };
 
 

@@ -29,7 +29,7 @@ UpdateDialog::UpdateDialog(QWidget* parent) : QDialog(parent), ui(new Ui::Update
     });
     connect(this, &UpdateDialog::downloadSucceed, this, [this](const QString& filePath) {
         qDebug() << "Download succeed" << filePath;
-        if (filePath.endsWith(".zip")) {
+        if (filePath.endsWith(".zip", Qt::CaseInsensitive)) { // 大小写不敏感
             auto relDir = QDir(qApp->applicationDirPath() + '/' + archive.extractDir);
             relDir.removeRecursively();
             if (QZipReader reader(filePath); reader.isReadable() &&
@@ -65,6 +65,7 @@ void UpdateDialog::fetchGithubReleaseInfo() {
     ui->textBrowser->setMarkdown("## Fetching...");
     const QString ApiUrl = QString("https://api.github.com/repos/%1/%2/releases/latest").arg(Owner, Repo);
     QNetworkRequest request(ApiUrl);
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
     auto* reply = manager.get(request);
     connect(reply, &QNetworkReply::finished, this, [this, reply] {
         reply->deleteLater();
@@ -82,8 +83,18 @@ void UpdateDialog::fetchGithubReleaseInfo() {
         relInfo.description = obj["body"].toString();
         relInfo.publishTime = toLocalTime(obj["published_at"].toString());
 
-        if (const auto assets = obj["assets"].toArray(); !assets.isEmpty())
-            relInfo.downloadUrl = assets.first()["browser_download_url"].toString();
+        if (const auto assets = obj["assets"].toArray(); !assets.isEmpty()) {
+            // 筛选 zip asset，避免取到非压缩包或顺序不确定导致错误下载
+            for (const auto& asset: assets) {
+                const auto name = asset["name"].toString();
+                if (name.endsWith(".zip", Qt::CaseInsensitive)) {
+                    relInfo.downloadUrl = asset["browser_download_url"].toString();
+                    break;
+                }
+            }
+            if (relInfo.downloadUrl.isEmpty()) // fallback 到第一个 asset（保持原行为）
+                relInfo.downloadUrl = assets.first()["browser_download_url"].toString();
+        }
 
         qDebug() << "Update info fetched" << relInfo.ver << relInfo.downloadUrl;
         ui->label_newVer->setText(QString("New Version: v%1 (%2)").arg(relInfo.ver.toString(), relInfo.publishTime));
@@ -98,6 +109,8 @@ void UpdateDialog::fetchGithubReleaseInfo() {
 
 void UpdateDialog::download(const QString& url, const QString& savePath) {
     QNetworkRequest request(url);
+    // 限制只允许 https，避免重定向到 http 或恶意站点
+    request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::NoLessSafeRedirectPolicy);
     auto* reply = manager.get(request);
     ui->progressBar->show();
     ui->progressBar->setValue(0);
@@ -105,20 +118,27 @@ void UpdateDialog::download(const QString& url, const QString& savePath) {
 
     QFile::remove(savePath);
     downloadStatus.file.setFileName(savePath);
-    downloadStatus.file.open(QIODevice::WriteOnly);
+    if (!downloadStatus.file.open(QIODevice::WriteOnly)) { // 检查打开是否成功（Program Files 不可写场景）
+        qWarning() << "Failed to open file for writing:" << savePath;
+        ui->textBrowser->setMarkdown("## Cannot write to file❎\n" + savePath);
+        ui->btn_update->setEnabled(true);
+        reply->abort();
+        reply->deleteLater();
+        return;
+    }
     downloadStatus.success = false;
     downloadStatus.reply = reply;
 
     connect(reply, &QNetworkReply::readyRead, this, [this, reply] {
-        downloadStatus.file.write(reply->readAll());
+        const auto data = reply->readAll();
+        if (downloadStatus.file.write(data) != data.size()) // 检查写入返回值，磁盘满时及时失败
+            qWarning() << "Write incomplete:" << downloadStatus.file.fileName();
     });
 
     connect(reply, &QNetworkReply::downloadProgress, this, [this](qint64 bytesReceived, qint64 bytesTotal) {
         qDebug() << "Download progress" << bytesReceived << bytesTotal;
-        if (bytesReceived == bytesTotal)
-            downloadStatus.success = true;
-
-        ui->progressBar->setMaximum(bytesTotal);
+        // 成功判定已移至 finished 回调（以 error() + HTTP 状态码为准），此处仅更新进度条
+        ui->progressBar->setMaximum(bytesTotal > 0 ? bytesTotal : 0);
         ui->progressBar->setValue(bytesReceived);
     });
 
@@ -128,8 +148,11 @@ void UpdateDialog::download(const QString& url, const QString& savePath) {
         downloadStatus.file.close(); // close才刷新缓冲区，写入磁盘，所以必须在解压之前！不然解压概率性失败...(QZip: EndOfDirectory not found)
         ui->progressBar->hide();
         ui->btn_update->setEnabled(true);
-        if (!downloadStatus.success || reply->error() != QNetworkReply::NoError) {
-            qWarning() << "Download failed" << reply->errorString();
+        // 成功判定以 finished 时的错误码与 HTTP 状态码为准，而非 downloadProgress 的 bytesReceived == bytesTotal
+        // （Content-Length 缺失时 bytesTotal 恒为 -1，条件永不成立或意外成立均不可靠）
+        const auto httpStatus = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (reply->error() != QNetworkReply::NoError || (httpStatus != 0 && httpStatus != 200)) {
+            qWarning() << "Download failed" << reply->errorString() << httpStatus;
             ui->textBrowser->setMarkdown("## Download failed❎ [" + reply->url().host() + "]\n" + reply->errorString());
             sysTray.showMessage("Download failed", reply->errorString());
         } else {

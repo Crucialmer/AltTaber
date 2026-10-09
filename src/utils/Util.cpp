@@ -428,7 +428,7 @@ namespace Util {
 
             if (hResult == S_OK) {
                 icon = QtWin::fromHICON(hIcon);
-                DestroyIcon(sfi.hIcon);
+                DestroyIcon(hIcon); // GetIcon 返回的句柄需显式销毁；原代码误销毁了 sfi.hIcon（SHGFI_SYSICONINDEX 模式下该字段无效）
             }
         }
         imageList->Release();

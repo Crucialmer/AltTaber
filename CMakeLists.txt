@@ -1,11 +1,12 @@
-﻿cmake_minimum_required(VERSION 3.29)
+﻿cmake_minimum_required(VERSION 3.21)
 project(Win_Switcher)
 
 set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
-set(CMAKE_PREFIX_PATH "D:/Qt/6.8.1/msvc2022_64/lib/cmake")
+# 不硬编码 Qt 路径，改由命令行 -DCMAKE_PREFIX_PATH= 或环境变量传入
 list(APPEND CMAKE_AUTOUIC_SEARCH_PATHS ui) # 如果.ui文件不在.cpp同一目录下，需要添加搜索路径
 
 # 设置版本信息变量
@@ -79,10 +80,13 @@ target_link_libraries(Win_Switcher
         Qt::Widgets
         Qt::Xml
         Qt::Network
-)
-
-target_link_libraries(${PROJECT_NAME}
+        Qt::CorePrivate   # UpdateDialog.cpp 使用了 QtCore/private/qzipreader_p.h
+        Qt::GuiPrivate    # 引用 Qt6Gui_PRIVATE_INCLUDE_DIRS
         Dwmapi
+        Psapi            # Util.cpp 使用 GetModuleFileNameEx
+        Propsys          # AppUtil.cpp 使用 propsys (SHGetPropertyStoreFromParsingName)
+        Comctl32         # commoncontrols.h
+        windowsapp       # winrt/Windows.Management.Deployment.h
 )
 
 # 启用`gui_private`模块
@@ -90,9 +94,8 @@ target_link_libraries(${PROJECT_NAME}
 target_include_directories(${PROJECT_NAME} PRIVATE ${Qt6Gui_PRIVATE_INCLUDE_DIRS})
 
 set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "AltTaber") # 设置输出文件名
-if (CMAKE_BUILD_TYPE MATCHES "Release")
-    set_target_properties(${PROJECT_NAME} PROPERTIES WIN32_EXECUTABLE true) # 设置为窗口应用程序, 无控制台，同时会导致Clion无法捕获输出
-endif ()
+# 用生成器表达式兼容多配置生成器（Visual Studio 下 CMAKE_BUILD_TYPE 为空）
+set_target_properties(${PROJECT_NAME} PROPERTIES WIN32_EXECUTABLE $<CONFIG:Release>)
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE
         QT_DEPRECATED_WARNINGS
@@ -101,5 +104,9 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
 )
 
 if (MSVC)
-    target_compile_options(${PROJECT_NAME} PRIVATE "/utf-8")
+    target_compile_options(${PROJECT_NAME} PRIVATE
+            /utf-8
+            /W4            # 开启高等级警告
+            /permissive-   # 标准一致性
+    )
 endif ()

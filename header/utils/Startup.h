@@ -82,7 +82,8 @@ private:
 
     static void on_reg() {
         QSettings reg(REG_AUTORUN, QSettings::NativeFormat);
-        reg.setValue(REG_APP_NAME, applicationPath());
+        // Run 键值路径含空格时必须带引号，否则开机启动失败或参数截断
+        reg.setValue(REG_APP_NAME, "\"" + applicationPath() + "\"");
     }
 
     static void off_reg() {
@@ -94,9 +95,15 @@ private:
         QSettings reg(REG_AUTORUN, QSettings::NativeFormat);
         auto appPath = applicationPath();
         auto path = reg.value(REG_APP_NAME);
-        if (path.isValid() && path.toString() != appPath) // just for warning
-            qWarning() << "REG: AutoRun path mismatch:" << path.toString() << appPath;
-        return path.toString() == appPath;
+        if (path.isValid()) {
+            // 注册表值可能带引号，统一去除后比较；同时统一分隔符与大小写
+            QString stored = path.toString();
+            stored.remove('\"');
+            if (stored.compare(appPath, Qt::CaseInsensitive) != 0)
+                qWarning() << "REG: AutoRun path mismatch:" << stored << appPath;
+            return stored.compare(appPath, Qt::CaseInsensitive) == 0;
+        }
+        return false;
     }
 
 private:

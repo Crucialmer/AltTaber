@@ -4,9 +4,9 @@
 #include <QDir>
 #include <QFile>
 #include <QGuiApplication>
-#include <QMessageBox>
 #include <QProcess>
 #include <QString>
+#include <QTemporaryFile>
 
 /// Query Author and User ID via `PowerShell` for schtasks.exe xml
 /// <br> GetTokenInformation & LookupAccountSidW is too complex
@@ -19,11 +19,18 @@ QPair<QString, QString> ScheduledTask::queryAuthorUserId() {
     )";
     QProcess process;
     process.start("powershell", QStringList() << "-Command" << Command);
-    process.waitForFinished();
+    if (!process.waitForFinished(10000)) { // 10s 超时，避免无限阻塞 GUI
+        qWarning() << "queryAuthorUserId: powershell timeout";
+        return {};
+    }
 
     const auto output = process.readAllStandardOutput();
-    const auto list = QString(output).replace("\r\n", "\n").split('\n', Qt::SkipEmptyParts);
-    Q_ASSERT(list.size() == 2);
+    const auto list = QString(output).replace("
+\n", "\n").split('\n', Qt::SkipEmptyParts);
+    if (list.size() < 2) { // Q_ASSERT 在 Release 下会被编译掉，改为运行时检查
+        qWarning() << "queryAuthorUserId: unexpected powershell output:" << output;
+        return {};
+    }
     return {list.at(0), list.at(1)};
 }
 
@@ -35,6 +42,12 @@ QPair<QString, QString> ScheduledTask::queryAuthorUserId() {
 QString ScheduledTask::createTaskXml(const QString& exePath, const QString& description, bool asAdmin, int priority) {
     const QString isoTime = QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
     const auto [author, userId] = queryAuthorUserId();
+    // XML 转义：author/exePath 可能包含 & < > 等字符
+    auto xmlEscape = [](const QString& s) -> QString {
+        QString escaped = s;
+        escaped.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;");
+        return escaped;
+    };
     // Clion Nova bug: 必须把xml字符串的缩进也改成4个空格，否则整个cpp文件都会被格式化为2个空格
     return QString(R"xml(<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
@@ -81,30 +94,35 @@ QString ScheduledTask::createTaskXml(const QString& exePath, const QString& desc
     </Actions>
 </Task>
 )xml").arg(isoTime)
-      .arg(author)
-      .arg(description)
+      .arg(xmlEscape(author))
+      .arg(xmlEscape(description))
       .arg(userId)
       .arg(asAdmin ? "HighestAvailable" : "LeastPrivilege")
       .arg(priority) // 计划任务中默认是7（低于正常），为了改变这个值，只能通过xml
-      .arg(QDir::toNativeSeparators(exePath));
+      .arg(xmlEscape(QDir::toNativeSeparators(exePath)));
 }
 
 bool ScheduledTask::createTask(const QString& taskName) {
     const auto xml = createTaskXml(qApp->applicationFilePath(), "AltTaber startup as Admin");
-    QFile file(qApp->applicationDirPath() + "/schtasks.xml");
-    if (file.open(QIODevice::WriteOnly)) {
-        file.write(xml.toUtf8());
-        file.close();
-    } else {
-        qWarning() << "Failed to write schtasks.xml";
+    // 用 QTemporaryFile 避免 Program Files 目录不可写 + 文件名冲突
+    QTemporaryFile file(QDir::tempPath() + "/AltTaber_schtasks_XXXXXX.xml");
+    file.setAutoRemove(false); // schtasks 需要读取，先手动管理生命周期
+    if (!file.open()) {
+        qWarning() << "Failed to create temporary schtasks.xml";
         return false;
     }
+    file.write(xml.toUtf8());
+    file.close();
 
     QProcess process;
     process.start("schtasks",
                   QStringList() << "/create" << "/tn" << taskName << "/xml" << file.fileName() << "/f");
-    process.waitForFinished();
-    file.remove();
+    if (!process.waitForFinished(10000)) {
+        qWarning() << "createTask: schtasks timeout";
+        QFile::remove(file.fileName());
+        return false;
+    }
+    QFile::remove(file.fileName());
     bool isOk = (process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0);
     if (!isOk) {
         qWarning() << "Failed to create schtasks:" << QString::fromLocal8Bit(process.readAllStandardError())
@@ -117,7 +135,10 @@ bool ScheduledTask::queryTask(const QString& taskName) {
     QProcess process;
     // (Get-ScheduledTask -TaskName "taskName").Actions.Executable 方便但是巨慢（1000ms）
     process.start("schtasks", QStringList() << "/query" << "/tn" << taskName << "/FO" << "CSV" << "/NH" << "/V");
-    process.waitForFinished();
+    if (!process.waitForFinished(10000)) {
+        qWarning() << "queryTask: schtasks timeout";
+        return false;
+    }
     // Task not exist
     if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
         qDebug() << "Task not exist:" << taskName;
@@ -126,11 +147,14 @@ bool ScheduledTask::queryTask(const QString& taskName) {
 
     auto output = QString::fromLocal8Bit(process.readAllStandardOutput());
     auto csvList = output.simplified().removeFirst().chopped(1).split("\",\""); // ","
+    if (csvList.size() <= 8) { // 防御：列数不足时避免越界
+        qWarning() << "[queryTask] csv column count unexpected:" << csvList.size() << output;
+        return false;
+    }
     auto exePath = csvList.at(8).simplified();
     if (!exePath.endsWith(".exe", Qt::CaseInsensitive)) {
         qWarning() << "[queryTask] exePath(csv) parse error:" << exePath;
-        QMessageBox::warning(nullptr, "Query ScheduledTask", "exePath(csv) parse error");
-        return false;
+        return false; // 底层工具类不直接弹窗，由调用方决定是否提示
     }
     qDebug() << "queryTask exePath:" << exePath;
 
@@ -146,7 +170,10 @@ bool ScheduledTask::queryTask(const QString& taskName) {
 bool ScheduledTask::deleteTask(const QString& taskName) {
     QProcess process;
     process.start("schtasks", QStringList() << "/delete" << "/tn" << taskName << "/f");
-    process.waitForFinished();
+    if (!process.waitForFinished(10000)) {
+        qWarning() << "deleteTask: schtasks timeout";
+        return false;
+    }
     bool isOk = (process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0);
     if (!isOk) {
         qWarning() << "Failed to create schtasks:" << QString::fromLocal8Bit(process.readAllStandardError())

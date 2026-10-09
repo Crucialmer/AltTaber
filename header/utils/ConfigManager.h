@@ -3,6 +3,9 @@
 
 #include <QSettings>
 #include <QApplication>
+#include <QFileInfo>
+#include <QStandardPaths>
+#include <QDir>
 #include "ConfigManagerBase.h"
 
 // 注意：对于大量使用的类，header-only 模式会导致编译时间过长
@@ -22,7 +25,18 @@ public:
     ConfigManager& operator=(const ConfigManager&) = delete;
 
     static ConfigManager& instance() {
-        static const auto filePath = QApplication::applicationDirPath() + "/" + FileName;
+        static const auto filePath = [] {
+            const auto dirPath = QApplication::applicationDirPath() + "/" + FileName;
+            // 若应用目录不可写（如 Program Files），回退到用户 AppData，避免配置静默丢失
+            QFileInfo dirInfo(QApplication::applicationDirPath());
+            if (!dirInfo.isWritable()) {
+                qWarning() << "Application dir not writable, config fallback to AppData";
+                const auto appData = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+                QDir().mkpath(appData);
+                return appData + "/" + FileName;
+            }
+            return dirPath;
+        }();
         static ConfigManager instance{filePath}; // multiple threads safe
         return instance;
     }

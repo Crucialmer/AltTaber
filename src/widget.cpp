@@ -83,6 +83,7 @@ void Widget::keyPressEvent(QKeyEvent* event) {
         {Qt::Key_L, Qt::Key_Right}, // →
     };
     if (key == Qt::Key_Tab) { // switch to next or prev
+        if (lw->count() == 0) return QWidget::keyPressEvent(event);
         auto i = lw->currentRow();
         bool isShiftPressed = (modifiers & Qt::ShiftModifier);
         // weird formula, but works (hhh)
@@ -107,7 +108,7 @@ void Widget::keyPressEvent(QKeyEvent* event) {
     } else if (key == Qt::Key_Up || key == Qt::Key_Down) {
         if (auto item = lw->currentItem()) {
             auto center = lw->visualItemRect(item).center();
-            // 转发映射到WheelEvent
+            // 转发映射到WheelEvent；伪造事件的 angleDelta 与 eventFilter 中读取的轴保持一致（x 分量）
             auto wheelEvent = new QWheelEvent(center, lw->mapToGlobal(center), {},
                                               {key == Qt::Key_Up ? 120 : -120, 0},
                                               Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
@@ -115,6 +116,7 @@ void Widget::keyPressEvent(QKeyEvent* event) {
         }
     } else if (key == Qt::Key_Left || key == Qt::Key_Right) { // 默认情况下 左右键可以切换item 只需要处理边界循环即可
         const int N = lw->count();
+        if (N == 0) return QWidget::keyPressEvent(event);
         const int i = lw->currentRow();
         if (key == Qt::Key_Left && i == 0)
             lw->setCurrentRow(N - 1);
@@ -233,6 +235,21 @@ void Widget::notifyForegroundChanged(HWND hwnd, ForegroundChangeSource source) {
 QList<WindowGroup> Widget::prepareWindowGroupList() {
     QMap<QString, WindowGroup> winGroupMap;
     const auto list = Util::listValidWindows();
+    QSet<HWND> validHwnds(list.begin(), list.end());
+    // 清理 winActiveOrder 中已失效的 HWND，防止无限增长与句柄复用导致的排序错乱
+    for (auto it = winActiveOrder.begin(); it != winActiveOrder.end();) {
+        auto& hwndMap = it.value();
+        for (auto hIt = hwndMap.begin(); hIt != hwndMap.end();) {
+            if (!validHwnds.contains(hIt.key()))
+                hIt = hwndMap.erase(hIt);
+            else
+                ++hIt;
+        }
+        if (hwndMap.isEmpty())
+            it = winActiveOrder.erase(it);
+        else
+            ++it;
+    }
     for (auto hwnd: list) {
         if (hwnd == this->hWnd()) continue; // skip self
         auto path = Util::getWindowProcessPath(hwnd);
@@ -371,6 +388,7 @@ auto Widget::getLastValidActiveGroupWindow(const WindowGroup& group) -> QPair<HW
         windows << info.hwnd;
     sortGroupWindows(windows, group.exePath);
 
+    if (windows.isEmpty()) return {nullptr, QDateTime()}; // 防御：group.windows 为空时避免 first() UB
     if (auto time = hwndOrder.value(windows.first()); !time.isNull())
         return {windows.first(), time};
     else // check if the first HWND is recorded
@@ -404,42 +422,41 @@ bool Widget::eventFilter(QObject* watched, QEvent* event) {
             auto windowGroup = item->data(Qt::UserRole).value<WindowGroup>();
             if (windowGroup.windows.isEmpty()) return false;
 
-            static QListWidgetItem* lastItem = nullptr;
-            static HWND hwnd = nullptr;
-            if (lastItem != item) { // Alt+Tab也可能造成切换; 每次show列表都是重新构建，所以item指针必然不同（即使同一个app）
-                lastItem = item;
-                hwnd = nullptr;
+            // 原 static 状态已改为成员变量（wheelLastItem/wheelHwnd/isLastWheelRollUp），避免悬垂指针与跨调用污染
+            if (wheelLastItem != item) { // Alt+Tab也可能造成切换; 每次show列表都是重新构建，所以item指针必然不同（即使同一个app）
+                wheelLastItem = item;
+                wheelHwnd = nullptr;
                 groupWindowOrder.clear();
             }
             auto targetExe = windowGroup.exePath;
-            static bool isLastRollUp = true;
-            bool isRollUp = wheelEvent->angleDelta().x() > 0; // ListWidget的方向改成了从左到右，所以滚轮方向从y()变成x()了
+            bool isRollUp = wheelEvent->angleDelta().x() > 0; // ListWidget的方向改成了从左到右，所以滚轮方向从y()变成x()了；伪造的 keyPress 事件（widget.cpp:111）同样使用 x 分量，与真实滚轮保持一致
             if (groupWindowOrder.isEmpty())
                 groupWindowOrder = buildGroupWindowOrder(targetExe); // TODO 其实这里不需要build 直接用lw里的就行...
+            if (groupWindowOrder.isEmpty()) return false; // buildGroupWindowOrder 可能返回空，避免 first() UB
 
-            if (!hwnd) { // first time
-                hwnd = groupWindowOrder.first(); // 选择最后活跃的窗口 TODO 考虑当前窗口就是First的情况，需要跳过，类似WinGroup
+            if (!wheelHwnd) { // first time
+                wheelHwnd = groupWindowOrder.first(); // 选择最后活跃的窗口 TODO 考虑当前窗口就是First的情况，需要跳过，类似WinGroup
             } else { // select next window
-                if (isLastRollUp == isRollUp) // 滚轮方向切换时，不轮换窗口
-                    hwnd = rotateWindowInGroup(groupWindowOrder, hwnd, isRollUp);
+                if (isLastWheelRollUp == isRollUp) // 滚轮方向切换时，不轮换窗口
+                    wheelHwnd = rotateWindowInGroup(groupWindowOrder, wheelHwnd, isRollUp);
             }
-            isLastRollUp = isRollUp;
+            isLastWheelRollUp = isRollUp;
 
-            HWND nextFocus = hwnd; // this隐藏后的焦点备选窗口, for `swtichToWindow` after AltUp
+            HWND nextFocus = wheelHwnd; // this隐藏后的焦点备选窗口, for `swtichToWindow` after AltUp
             if (isRollUp) {
-                Util::bringWindowToTop(hwnd, this->hWnd()); // without activate
+                Util::bringWindowToTop(wheelHwnd, this->hWnd()); // without activate
             } else {
-                if (auto normal = rotateNormalWindowInGroup(groupWindowOrder, hwnd, false)) { // skip minimized
+                if (auto normal = rotateNormalWindowInGroup(groupWindowOrder, wheelHwnd, false)) { // skip minimized
                     ShowWindow(normal, SW_SHOWMINNOACTIVE); // minimize
-                    hwnd = normal;
-                    nextFocus = hwnd;
+                    wheelHwnd = normal;
+                    nextFocus = wheelHwnd;
                 }
-                if (auto normal = rotateNormalWindowInGroup(groupWindowOrder, hwnd, false))
+                if (auto normal = rotateNormalWindowInGroup(groupWindowOrder, wheelHwnd, false))
                     nextFocus = normal; // 备选焦点切换为下一个非最小化窗口 after AltUp
             }
             notifyForegroundChanged(nextFocus, Inner);
             showLabelForItem(item, Util::getWindowTitle(nextFocus));
-            qDebug() << "Wheel" << isRollUp << Util::getWindowTitle(nextFocus) << hwnd;
+            qDebug() << "Wheel" << isRollUp << Util::getWindowTitle(nextFocus) << wheelHwnd;
 
             return true; // stop propagation
         }
@@ -456,15 +473,14 @@ void Widget::rotateTaskbarWindowInGroup(const QString& exePath, bool forward, in
         return;
     }
 
-    static QString lastPath;
-    static HWND lastHwnd = nullptr;
-    if (lastPath != exePath) {
-        lastPath = exePath;
+    // 原函数内 static 状态已改为成员变量（taskbarLastPath/taskbarLastHwnd/isLastTaskbarForward），避免悬垂句柄污染
+    if (taskbarLastPath != exePath) {
+        taskbarLastPath = exePath;
         groupWindowOrder.clear();
     }
     if (groupWindowOrder.isEmpty()) {
         groupWindowOrder = buildGroupWindowOrder(exePath);
-        lastHwnd = nullptr;
+        taskbarLastHwnd = nullptr;
     }
 
     if (groupWindowOrder.isEmpty()) {
@@ -498,28 +514,35 @@ void Widget::rotateTaskbarWindowInGroup(const QString& exePath, bool forward, in
         //  例如：ksolaunch.exe -> wps.exe
         //  此时只能通过File Description来匹配，均为“WPS Office”
         if (groupWindowOrder.isEmpty()) { // 无力回天
-            qCritical() << "もうおしまいだ！";
+            qWarning() << "No valid window found for" << exePath << "and its child processes"; // 原日语吐槽改为统一日志级别
             return;
         }
     }
 
-    static bool isLastForward = true;
     HWND hwnd = nullptr;
-    if (!lastHwnd) {
+    if (!taskbarLastHwnd) {
         hwnd = groupWindowOrder.first();
         if (forward && hwnd == GetForegroundWindow()) // 如果first是前台窗口且forward，则轮换下一个
             hwnd = rotateWindowInGroup(groupWindowOrder, hwnd, true);
     } else {
-        if (isLastForward == forward)
-            hwnd = rotateWindowInGroup(groupWindowOrder, lastHwnd, forward);
+        if (isLastTaskbarForward == forward)
+            hwnd = rotateWindowInGroup(groupWindowOrder, taskbarLastHwnd, forward);
         else
-            hwnd = lastHwnd;
+            hwnd = taskbarLastHwnd;
     }
-    isLastForward = forward;
+    isLastTaskbarForward = forward;
+
+    // 使用前校验句柄有效性，避免对已关闭窗口操作
+    if (hwnd && !IsWindow(hwnd))
+        hwnd = nullptr;
+    if (!hwnd) {
+        taskbarLastHwnd = nullptr;
+        return;
+    }
 
     if (forward) {
-        static auto mouseEvent = [](DWORD flag) {
-            mouse_event(flag, 0, 0, 0, 0);
+        auto mouseEvent = [](DWORD flag) {
+            mouse_event(flag, 0, 0, 0, 0); // TODO 应迁移到 SendInput（mouse_event 已被标记为 legacy）
         };
         if (windows == 1) { // 由于过滤的存在，groupWindowOrder.size() 不一定等于 windows(真实窗口数量)
             // 单窗口情况下，模拟点击呼出，是最保险的
@@ -584,13 +607,14 @@ void Widget::rotateTaskbarWindowInGroup(const QString& exePath, bool forward, in
         }
     }
 
-    lastHwnd = hwnd;
+    taskbarLastHwnd = hwnd;
 }
 
 /// select next(forward)(older) or prev window in group<br>
 /// Do nothing, but select HWND
 HWND Widget::rotateWindowInGroup(const QList<HWND>& windows, HWND current, bool forward) {
     const auto N = windows.size();
+    if (N == 0) return nullptr; // 空列表守卫，避免 first()/取模 UB
     if (N == 1) return windows.first();
     for (int i = 0; i < N; i++) {
         if (windows.at(i) == current) {
@@ -605,6 +629,8 @@ HWND Widget::rotateWindowInGroup(const QList<HWND>& windows, HWND current, bool 
 /// Select next (including `current`) normal (!minimized) window in group<br>
 /// return nullptr if all minimized
 HWND Widget::rotateNormalWindowInGroup(const QList<HWND>& windows, HWND current, bool forward) {
+    if (windows.isEmpty()) return nullptr; // 空列表守卫
+    if (current && !IsWindow(current)) current = nullptr; // 死句柄防御：IsIconic 对死句柄返回值未定义
     for (int i = 0; IsIconic(current) && i < windows.size(); i++) // skip minimized
         current = rotateWindowInGroup(windows, current, forward);
     return IsIconic(current) ? nullptr : current;
