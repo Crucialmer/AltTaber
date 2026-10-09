@@ -11,6 +11,7 @@
 #include <QDateTime>
 #include "utils/QtWin.h"
 #include <QWheelEvent>
+#include <QMouseEvent>
 #include <QTimer>
 #include <QMetaEnum>
 #include <QSet>
@@ -486,6 +487,16 @@ QList<HWND> Widget::buildGroupWindowOrder(const QString& exePath) {
 }
 
 bool Widget::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == lw && event->type() == QEvent::MouseButtonPress) {
+        // 单击=选择：显式实现（不依赖列表默认行为）——选中并刷新高亮/预览标签；
+        // 双击（下方分支）/ Enter / 空格 才是确认切换
+        auto* me = static_cast<QMouseEvent*>(event);
+        if (this->isVisible() && me->button() == Qt::LeftButton) {
+            if (auto* item = lw->itemAt(me->position().toPoint()); item && lw->currentItem() != item)
+                lw->setCurrentItem(item); // 触发 currentItemChanged → showLabelForItem
+            // 不 return true：保留列表自身的后续处理（如双击序列）
+        }
+    }
     if (watched == lw && event->type() == QEvent::MouseButtonDblClick) {
         // 双击确认切换（单击仍用于选择）——所有呼出路径均适用（含非 pinned 的兜底路径）
         if (this->isVisible()) {
