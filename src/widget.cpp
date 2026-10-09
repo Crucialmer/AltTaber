@@ -175,7 +175,10 @@ void Widget::setupLabelFont() {
     static auto reloadLabelFontCfg = [this] {
         const QStringList Fonts = {"Microsoft YaHei UI", "Microsoft YaHei", "Consolas"}; // fallback
         auto labelFont = ui->label->font();
-        labelFont.setPointSize(cfg.get("label/font_size", 10).toInt());
+        auto fontSize = cfg.get("label/font_size", 10).toDouble(); // 支持小数，如 10.5（100% 缩放下即 14px）
+        if (fontSize <= 0)
+            fontSize = 10; // 防呆：非法值回退默认
+        labelFont.setPointSizeF(fontSize);
         auto defaultFF = QStringList{cfg.get("label/font_family", Fonts[0]).toString()};
         labelFont.setFamilies(defaultFF << Fonts.mid(1));
         ui->label->setFont(labelFont);

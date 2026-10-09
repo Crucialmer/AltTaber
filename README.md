@@ -121,6 +121,8 @@ font_family = "Microsoft YaHei UI"
 font_size = 10
 ```
 
+> `font_size` 支持小数，如 `10.5`（100% 缩放下恰好为 14px，显示更清晰）。
+
 ## 🧐Reference
 
 - [window-switcher](https://github.com/sigoden/window-switcher)
