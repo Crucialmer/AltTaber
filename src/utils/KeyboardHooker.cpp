@@ -87,11 +87,12 @@ LRESULT keyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                         case VK_LEFT:   if (!ctrl) qtKey = Qt::Key_Left; break;
                         case VK_RIGHT:  if (!ctrl) qtKey = Qt::Key_Right; break;
                         // Vim 键直接映射为方向键（绕过列表控件原生键盘搜索/事件冒泡的不确定性）；
-                        // 仅当弹窗持有前台时接管，避免吞掉在其他窗口正常输入 h/j/k/l 字母
-                        case VK_H:      if (isForeground && !ctrl) qtKey = Qt::Key_Left; break;
-                        case VK_J:      if (isForeground && !ctrl) qtKey = Qt::Key_Down; break;
-                        case VK_K:      if (isForeground && !ctrl) qtKey = Qt::Key_Up; break;
-                        case VK_L:      if (isForeground && !ctrl) qtKey = Qt::Key_Right; break;
+                        // 仅当弹窗持有前台时接管，避免吞掉在其他窗口正常输入 h/j/k/l 字母。
+                        // 注：SDK 未定义字母键 VK_ 宏，字母键 vkCode 即大写 ASCII 码，直接用字符字面量
+                        case 'H':      if (isForeground && !ctrl) qtKey = Qt::Key_Left; break;
+                        case 'J':      if (isForeground && !ctrl) qtKey = Qt::Key_Down; break;
+                        case 'K':      if (isForeground && !ctrl) qtKey = Qt::Key_Up; break;
+                        case 'L':      if (isForeground && !ctrl) qtKey = Qt::Key_Right; break;
                         default: break;
                     }
                 }
