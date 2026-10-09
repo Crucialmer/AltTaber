@@ -253,7 +253,7 @@ void Widget::notifyForegroundChanged(HWND hwnd, ForegroundChangeSource source) {
     // 通过`EVENT_SYSTEM_FOREGROUND`触发时忽略`IsWindowVisible`，因为窗口在创建瞬间可能不可见
     if (!Util::isWindowAcceptable(hwnd, source == WinEvent)) return;
     auto path = Util::getWindowProcessPath(hwnd); // TODO 比较耗时，最好仅在单次show期间缓存，同时避免hwnd复用造成缓存错误
-    // TODO 不能让winActiveOrder无限增长，需要定时清理
+    // 注：winActiveOrder 的失效清理在 prepareWindowGroupList（每次弹窗时执行，防止无限增长与句柄复用错乱）
     winActiveOrder[path].insert(hwnd, QDateTime::currentDateTime());
 
     auto sourceStr = QMetaEnum::fromType<ForegroundChangeSource>().valueToKey(source);
@@ -439,10 +439,12 @@ void Widget::handleIconClick(QListWidgetItem* item) {
 void Widget::switchToCurrentItem() {
     if (auto item = lw->currentItem()) {
         if (auto group = item->data(Qt::UserRole).value<WindowGroup>(); !group.windows.empty()) {
-            WindowInfo targetWin = group.windows.at(0); // TODO 需要排序（lastActiveWindow 被关闭情况下）
-            const auto lastActive = getLastActiveGroupWindow(group.exePath).first;
+            // 落点选择：优先"组内最近活跃且仍有效"的窗口——与弹窗列表的应用排序采用同一标准
+            // （getLastValidActiveGroupWindow）；组内无任何活跃记录时退回列表首个（枚举顺序）
+            WindowInfo targetWin = group.windows.at(0);
+            const auto lastValid = getLastValidActiveGroupWindow(group).first;
             for (auto& info: group.windows) {
-                if (info.hwnd == lastActive) {
+                if (info.hwnd == lastValid) {
                     targetWin = info;
                     break;
                 }
@@ -467,16 +469,7 @@ void Widget::cycleSelection(bool forward) {
     lw->setCurrentRow((i + (forward ? 1 : -1) + N) % N);
 }
 
-/// Warning: the `HWND` not guarantee to be valid (may be closed)
-auto Widget::getLastActiveGroupWindow(const QString& exePath) -> QPair<HWND, QDateTime> {
-    auto hwndOrder = winActiveOrder.value(exePath);
-    if (hwndOrder.isEmpty()) return {nullptr, QDateTime()};
-    // QHash & QMap deref to value(QDateTime) rather than QPair
-    auto iter = std::max_element(hwndOrder.begin(), hwndOrder.end());
-    return {iter.key(), iter.value()};
-}
-
-/// return null if no window recorded in group
+/// 返回组内最近活跃且仍有效的窗口（与弹窗列表的应用排序同一标准）；组内无任何活跃记录时返回 null
 auto Widget::getLastValidActiveGroupWindow(const WindowGroup& group) -> QPair<HWND, QDateTime> {
     auto hwndOrder = winActiveOrder.value(group.exePath);
     if (hwndOrder.isEmpty()) return {nullptr, QDateTime()};
@@ -500,7 +493,7 @@ void Widget::sortGroupWindows(QList<HWND>& windows, const QString& exePath) {
     // sort by active order
     std::sort(windows.begin(), windows.end(), [&activeOrdMap](HWND a, HWND b) {
         return activeOrdMap.value(a) > activeOrdMap.value(b); // default value if not found
-    }); // TODO update winActiveOrder! (remove invalid HWND)
+    }); // 失效 HWND 的剔除由 prepareWindowGroupList 统一执行（此处排序容忍映射中存在失效项）
 }
 
 /// group by exePath, sort by active order (last active first)
