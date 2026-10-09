@@ -1,7 +1,12 @@
 ﻿# AltTaber
 
-![GitHub release (latest by date)](https://img.shields.io/github/v/release/MrBeanCpp/AltTaber)
-![Github Release Downloads](https://img.shields.io/github/downloads/MrBeanCpp/AltTaber/total)
+> **Fork 维护版**：基于 [MrBeanCpp/AltTaber](https://github.com/MrBeanCpp/AltTaber) 的个人维护分支，
+> 包含 22 项 bug 修复、性能优化（钩子异步化、托盘菜单加速）、
+> 新功能 **Ctrl+Alt+Tab 固定切换器**（松开按键后保持显示）与 GitHub Actions 自动构建发布。
+> 下载：[Releases](https://github.com/Crucialmer/AltTaber/releases)
+
+![GitHub release (latest by date)](https://img.shields.io/github/v/release/Crucialmer/AltTaber)
+![Github Release Downloads](https://img.shields.io/github/downloads/Crucialmer/AltTaber/total)
 ![Language](https://img.shields.io/badge/language-C++-239120)
 ![OS](https://img.shields.io/badge/OS-Windows-0078D4)
 

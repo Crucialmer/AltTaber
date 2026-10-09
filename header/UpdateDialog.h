@@ -39,7 +39,7 @@ protected:
 private:
     Ui::UpdateDialog* ui;
     QNetworkAccessManager manager;
-    static constexpr auto Owner = "MrBeanCpp";
+    static constexpr auto Owner = "Crucialmer";
     static constexpr auto Repo = "AltTaber";
     const QVersionNumber version = normalizeVersion(QApplication::applicationVersion());
 
