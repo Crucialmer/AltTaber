@@ -87,14 +87,14 @@ void UpdateDialog::fetchGithubReleaseInfo() {
             relInfo.downloadUrl.clear(); // 先清空，防止上次请求的残留值在“assets 全非 zip”时被误用
             // 筛选 zip asset，避免取到非压缩包或顺序不确定导致错误下载
             for (const auto& asset: assets) {
-                const auto name = asset["name"].toString();
+                const auto name = asset.toObject()["name"].toString();
                 if (name.endsWith(".zip", Qt::CaseInsensitive)) {
-                    relInfo.downloadUrl = asset["browser_download_url"].toString();
+                    relInfo.downloadUrl = asset.toObject()["browser_download_url"].toString();
                     break;
                 }
             }
             if (relInfo.downloadUrl.isEmpty()) // fallback 到第一个 asset（保持原行为）
-                relInfo.downloadUrl = assets.first()["browser_download_url"].toString();
+                relInfo.downloadUrl = assets.first().toObject()["browser_download_url"].toString();
         }
 
         qDebug() << "Update info fetched" << relInfo.ver << relInfo.downloadUrl;
