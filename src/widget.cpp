@@ -466,6 +466,9 @@ bool Widget::eventFilter(QObject* watched, QEvent* event) {
 
 /// `forward`: true for restore, false for minimize
 void Widget::rotateTaskbarWindowInGroup(const QString& exePath, bool forward, int windows) {
+    static constexpr auto mouseEvent = [](DWORD flag) { // 文件内共享：timer 回调 lambda 也要用，不能是块作用域
+        mouse_event(flag, 0, 0, 0, 0); // TODO 应迁移到 SendInput（mouse_event 已被标记为 legacy）
+    };
     qDebug() << "(Taskbar)Wheel on:" << exePath << forward << windows;
     if (exePath.isEmpty()) return;
     if (!windows) { // 程序没有打开的窗口，处于关闭状态; 若不拦截，可能造成错误窗口被触发：explorer.exe -> msedge.exe
@@ -541,9 +544,6 @@ void Widget::rotateTaskbarWindowInGroup(const QString& exePath, bool forward, in
     }
 
     if (forward) {
-        auto mouseEvent = [](DWORD flag) {
-            mouse_event(flag, 0, 0, 0, 0); // TODO 应迁移到 SendInput（mouse_event 已被标记为 legacy）
-        };
         if (windows == 1) { // 由于过滤的存在，groupWindowOrder.size() 不一定等于 windows(真实窗口数量)
             // 单窗口情况下，模拟点击呼出，是最保险的
             if ((hwnd != GetForegroundWindow() || IsIconic(hwnd))) { // 若采用SW_SHOWMINNOACTIVE, 则前台窗口不会变化，可能为刚刚最小化的窗口

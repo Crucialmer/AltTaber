@@ -25,8 +25,7 @@ QPair<QString, QString> ScheduledTask::queryAuthorUserId() {
     }
 
     const auto output = process.readAllStandardOutput();
-    const auto list = QString(output).replace("
-\n", "\n").split('\n', Qt::SkipEmptyParts);
+    const auto list = QString(output).replace("\r\n", "\n").split('\n', Qt::SkipEmptyParts);
     if (list.size() < 2) { // Q_ASSERT 在 Release 下会被编译掉，改为运行时检查
         qWarning() << "queryAuthorUserId: unexpected powershell output:" << output;
         return {};
