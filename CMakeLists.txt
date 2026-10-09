@@ -13,10 +13,6 @@ list(APPEND CMAKE_AUTOUIC_SEARCH_PATHS ui) # 如果.ui文件不在.cpp同一目�
 set(VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
 set(VERSION_MINOR ${PROJECT_VERSION_MINOR})
 set(VERSION_PATCH ${PROJECT_VERSION_PATCH})
-# 注入 QApplication::applicationVersion()（UpdateDialog 更新检查依赖）
-target_compile_definitions(${PROJECT_NAME} PRIVATE
-        APP_VERSION="${PROJECT_VERSION}"
-)
 
 set(COMPANY_NAME "MrBeanCpp")
 set(FILE_DESCRIPTION "AltTaber - Window Switcher")
@@ -102,6 +98,7 @@ set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "AltTaber") # 设�
 set_target_properties(${PROJECT_NAME} PROPERTIES WIN32_EXECUTABLE $<CONFIG:Release>)
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE
+        APP_VERSION="${PROJECT_VERSION}" # 注入 QApplication::applicationVersion()（UpdateDialog 更新检查依赖）
         QT_DEPRECATED_WARNINGS
         UNICODE # for Windows API，使用W版本
         _UNICODE # for C/C++ 标准库
