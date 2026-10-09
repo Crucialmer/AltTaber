@@ -11,21 +11,23 @@
 /// Query Author and User ID via `PowerShell` for schtasks.exe xml
 /// <br> GetTokenInformation & LookupAccountSidW is too complex
 QPair<QString, QString> ScheduledTask::queryAuthorUserId() {
+    // PS 5.1 管道输出默认按控制台代码页(GBK)编码——命令内先强制 UTF-8，再用 fromUtf8 解码，避免中文用户名乱码
     const QString Command = R"(
+        try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch { }
         $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
         $author = $identity.Name
         $sid = $identity.User.Value
         Write-Output "$author`n$sid"
     )";
     QProcess process;
-    process.start("powershell", QStringList() << "-Command" << Command);
+    process.start("powershell", QStringList() << "-NoProfile" << "-Command" << Command); // -NoProfile：避免用户配置向 stdout 混入额外输出
     if (!process.waitForFinished(10000)) { // 10s 超时，避免无限阻塞 GUI
         qWarning() << "queryAuthorUserId: powershell timeout";
         return {};
     }
 
     const auto output = process.readAllStandardOutput();
-    const auto list = QString(output).replace("\r\n", "\n").split('\n', Qt::SkipEmptyParts);
+    const auto list = QString::fromUtf8(output).replace("\r\n", "\n").split('\n', Qt::SkipEmptyParts);
     if (list.size() < 2) { // Q_ASSERT 在 Release 下会被编译掉，改为运行时检查
         qWarning() << "queryAuthorUserId: unexpected powershell output:" << output;
         return {};
@@ -92,13 +94,10 @@ QString ScheduledTask::createTaskXml(const QString& exePath, const QString& desc
         </Exec>
     </Actions>
 </Task>
-)xml").arg(isoTime)
-      .arg(xmlEscape(author))
-      .arg(xmlEscape(description))
-      .arg(userId)
-      .arg(asAdmin ? "HighestAvailable" : "LeastPrivilege")
-      .arg(priority) // 计划任务中默认是7（低于正常），为了改变这个值，只能通过xml
-      .arg(xmlEscape(QDir::toNativeSeparators(exePath)));
+)xml").arg(isoTime, xmlEscape(author), xmlEscape(description), userId,
+      asAdmin ? QStringLiteral("HighestAvailable") : QStringLiteral("LeastPrivilege"),
+      QString::number(priority), // 计划任务中默认是7（低于正常），为了改变这个值，只能通过xml
+      xmlEscape(QDir::toNativeSeparators(exePath))); // 多参数=一次扫描替换：值中若含 %N 不会被二次替换（链式 .arg 会）
 }
 
 bool ScheduledTask::createTask(const QString& taskName) {
@@ -110,7 +109,13 @@ bool ScheduledTask::createTask(const QString& taskName) {
         qWarning() << "Failed to create temporary schtasks.xml";
         return false;
     }
-    file.write(xml.toUtf8());
+    // schtasks 对无 BOM 的 XML 按系统 ANSI(GBK) 解码——声明 UTF-16 但实际写 UTF-8 字节时，
+    // 中文（用户名/安装路径）会静默变乱码，创建出的自启动任务指向错误路径（实测 Win11 26100）。
+    // 正确做法：写 UTF-16LE + BOM，与 PowerShell Export-ScheduledTask 格式一致。
+    // （UTF-8 声明会被直接拒绝："任务 XML 格式错误 … 无法切换编码"）
+    QByteArray data("\xFF\xFE", 2); // UTF-16LE BOM
+    data.append(reinterpret_cast<const char*>(xml.utf16()), xml.size() * 2);
+    file.write(data);
     file.close();
 
     QProcess process;
@@ -145,12 +150,12 @@ bool ScheduledTask::queryTask(const QString& taskName) {
     }
 
     auto output = QString::fromLocal8Bit(process.readAllStandardOutput());
-    auto csvList = output.simplified().removeFirst().chopped(1).split("\",\""); // ","
+    auto csvList = output.trimmed().removeFirst().chopped(1).split("\",\""); // ","
     if (csvList.size() <= 8) { // 防御：列数不足时避免越界
         qWarning() << "[queryTask] csv column count unexpected:" << csvList.size() << output;
         return false;
     }
-    auto exePath = csvList.at(8).simplified();
+    auto exePath = csvList.at(8).trimmed(); // 用 trimmed 而非 simplified：保留路径内连续空格，避免与 AppPath 误判不等
     if (!exePath.endsWith(".exe", Qt::CaseInsensitive)) {
         qWarning() << "[queryTask] exePath(csv) parse error:" << exePath;
         return false; // 底层工具类不直接弹窗，由调用方决定是否提示

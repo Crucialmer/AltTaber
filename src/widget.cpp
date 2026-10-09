@@ -650,11 +650,11 @@ void Widget::rotateTaskbarWindowInGroup(const QString& exePath, bool forward, in
                 Util::switchToWindow(hwnd, true);
 
             static QTimer* timer = [this]() {
-                auto* timer = new QTimer;
-                timer->setSingleShot(true);
-                timer->setInterval(200);
+                auto* t = new QTimer;
+                t->setSingleShot(true);
+                t->setInterval(200);
                 // TODO cursor移动后立即释放 防止拖拽
-                timer->callOnTimeout(this, [this]() {
+                t->callOnTimeout(this, [this]() {
                     mouseEvent(MOUSEEVENTF_LEFTUP);
                     qDebug() << "(Taskbar)#Release LButton";
 
@@ -669,7 +669,7 @@ void Widget::rotateTaskbarWindowInGroup(const QString& exePath, bool forward, in
                         }
                     });
                 });
-                return timer;
+                return t;
             }();
             timer->stop();
             timer->start();

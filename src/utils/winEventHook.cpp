@@ -5,8 +5,8 @@
 static HWINEVENTHOOK handler = nullptr;
 static WinEventCallback callback = nullptr;
 
-void CALLBACK WinEventProc(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD dwEventThread,
-                           DWORD dwmsEventTime) {
+void CALLBACK WinEventProc(HWINEVENTHOOK /*hWinEventHook*/, DWORD event, HWND hwnd, LONG idObject, LONG /*idChild*/,
+                           DWORD /*dwEventThread*/, DWORD /*dwmsEventTime*/) {
     if (idObject != OBJID_WINDOW) // 确保对象是窗口，而不是子对象（如按钮）
         return;
 

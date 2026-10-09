@@ -165,22 +165,32 @@ void UpdateDialog::download(const QString& url, const QString& savePath) {
 }
 
 QString UpdateDialog::writeBat(const QString& sourceDir, const QString& targetDir) const {
-    QFile file(qApp->applicationDirPath() + "/copy.bat");
-    if (file.open(QFile::WriteOnly | QFile::Text)) {
-        QTextStream text(&file);
-        text << "@timeout /t 1 /NOBREAK" << '\n';
-        text << "@cd /d %~dp0" << '\n'; //切换到bat目录，否则为qt的exe目录
-        text << "@echo ##Copying files, please wait......\n";
-        text << QString("xcopy \"%1\" \"%2\" /E /H /Y\n").arg(QDir::toNativeSeparators(sourceDir), QDir::toNativeSeparators(targetDir));
-        text << "@echo -------------------------------------------------------\n";
-        text << "@echo ##Update SUCCESSFUL(Maybe)\n";
-        text << "@echo -------------------------------------------------------\n";
-        // text << "@pause\n";
-        text << QString("@del \"%1\"\n").arg(archive.fileName);
-        text << QString("@rd /S /Q \"%1\"\n").arg(archive.extractDir);
-        text << QString("@start \"\" \"%1\" --verify-update \"%2->%3\"\n").arg(QFile(qApp->applicationFilePath()).fileName())
-                                                                          .arg(version.toString(), relInfo.ver.toString());
-        text << "@del %0";
+    const auto appDir = qApp->applicationDirPath();
+    // bat 由 cmd.exe 按系统代码页(ANSI/OEM)解析——为避免中文乱码，bat 内容保持纯 ASCII：
+    // 所有路径改用 %~dp0（=bat 所在目录）在运行时展开，cmd 内部以 Unicode 处理，不受代码页影响
+    const auto relSource = QDir::toNativeSeparators(QDir(appDir).relativeFilePath(sourceDir));
+    auto relTarget = QDir::toNativeSeparators(QDir(appDir).relativeFilePath(targetDir));
+    if (relTarget.isEmpty())
+        relTarget = "."; // targetDir==程序目录时相对路径为空，用 "."（即 "%~dp0."）
+    QString bat;
+    bat += "@timeout /t 1 /NOBREAK\r\n";
+    bat += "@cd /d \"%~dp0\"\r\n"; //切换到bat目录，否则为qt的exe目录
+    bat += "@echo ##Copying files, please wait......\r\n";
+    bat += QString("xcopy \"%~dp0%1\" \"%~dp0%2\" /E /H /Y\r\n").arg(relSource, relTarget);
+    bat += "@echo -------------------------------------------------------\r\n";
+    bat += "@echo ##Update SUCCESSFUL(Maybe)\r\n";
+    bat += "@echo -------------------------------------------------------\r\n";
+    // bat += "@pause\r\n";
+    bat += QString("@del \"%~dp0%1\"\r\n").arg(archive.fileName);
+    bat += QString("@rd /S /Q \"%~dp0%1\"\r\n").arg(archive.extractDir);
+    bat += QString("@start \"\" \"%~dp0%1\" --verify-update \"%2->%3\"\r\n").arg(QFile(qApp->applicationFilePath()).fileName(),
+                                                                                 version.toString(), relInfo.ver.toString());
+    bat += "@del \"%~f0\"";
+    QFile file(appDir + "/copy.bat");
+    if (file.open(QFile::WriteOnly)) {
+        const QByteArray data = bat.toLocal8Bit(); // 系统代码页（中文=GBK），cmd 按此解析
+        if (file.write(data) != data.size())
+            qWarning() << "Failed to write bat file:" << file.fileName();
     }
     return file.fileName();
 }
