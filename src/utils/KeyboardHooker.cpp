@@ -7,6 +7,10 @@
 
 LRESULT keyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
     using Hooker = KeyboardHooker;
+    // Tab 自动重复守卫：按住按键时系统约30ms触发一次重复 keydown，pinned 模式下重复的
+    // requestShowPinned 会被误判为"再次按下=确认切换"，导致弹出窗口刚显示就被切走（无法保持）。
+    // 仅对 Ctrl+Alt+Tab 呼出去重；普通 Alt+Tab 的重复仍放行（按住 Tab 连续切换是原设计行为）。
+    static bool s_ctrlTabDown = false;
     if (nCode == HC_ACTION) {
         if (wParam == WM_SYSKEYDOWN || wParam == WM_KEYDOWN) { // Alt & [Alt按下时的Tab]属于SysKey
             auto* pKeyBoard = reinterpret_cast<KBDLLHOOKSTRUCT*>(lParam);
@@ -23,6 +27,9 @@ LRESULT keyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                 if (pKeyBoard->vkCode == VK_TAB) {
                     bool isCtrlPressed = Util::isKeyPressed(VK_CONTROL);
                     if (isCtrlPressed) {
+                        if (s_ctrlTabDown)
+                            return 1; // 自动重复事件，忽略（只处理首次按下）
+                        s_ctrlTabDown = true;
                         // Ctrl+Alt+Tab：松手后切换器保持显示（pinned），Enter/点击确认，Esc 取消
                         qDebug() << "Ctrl+Alt+Tab detected!";
                         QMetaObject::invokeMethod(Hooker::receiver, "requestShowPinned", Qt::QueuedConnection);
@@ -47,8 +54,10 @@ LRESULT keyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     return 1; // 阻止事件传递
                 }
             }
-        } else if (wParam == WM_KEYUP) { // Amazing, Alt Down is `WM_SYSKEYDOWN`, but release is `WM_KEYUP`
+        } else if (wParam == WM_KEYUP || wParam == WM_SYSKEYUP) { // Amazing, Alt Down is `WM_SYSKEYDOWN`, but release is `WM_KEYUP`
             auto* pKeyBoard = reinterpret_cast<KBDLLHOOKSTRUCT*>(lParam);
+            if (pKeyBoard->vkCode == VK_TAB)
+                s_ctrlTabDown = false; // 释放时重置自动重复守卫
             if (pKeyBoard->vkCode == VK_LMENU && Hooker::receiver) {
                 // BUG: Alt + 方向键 长按，过一秒会触发Alt release，而Alt + 其他键则不会，可能是Windows保护机制或键盘问题？
                 qDebug() << "Alt released!";

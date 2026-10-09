@@ -206,6 +206,7 @@ namespace Util {
     void switchToWindow(HWND hwnd, bool force) {
         if (IsIconic(hwnd))
             ShowWindow(hwnd, SW_RESTORE);
+        const HWND prevForeground = GetForegroundWindow();
         if (force) { // 强制措施(hack)
             // 如果本进程没有前台窗口，则Windows不允许抢占焦点，此时需要hack技巧
             // 此处模拟任意按键均可（除了LAlt，因为我们正按着）; 推测是满足了：调用进程收到了最后一个输入事件
@@ -229,6 +230,17 @@ namespace Util {
         } else {
             // 如果本进程has前台窗口，则可以随意调用该函数转移焦点
             SetForegroundWindow(hwnd);
+        }
+        // 回退链：非管理员进程对高权限窗口 SetForegroundWindow 会静默失败（UIPI 拦截），
+        // 此时降级为"最小破坏"方案：前置 Z 序（不激活）+ 恢复最小化 + 系统闪烁提示，
+        // 保证窗口至少可见并处于任务栏最前，用户一次点击即可获得焦点。
+        if (GetForegroundWindow() != hwnd && prevForeground != hwnd) {
+            qWarning() << "SetForegroundWindow failed (elevated target?), fallback to topmost-without-activate:" << hwnd;
+            if (IsIconic(hwnd))
+                ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+            SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            if (!IsIconic(hwnd))
+                FlashWindow(hwnd, TRUE); // 任务栏闪烁提示（非激活）
         }
     }
 
@@ -325,15 +337,11 @@ namespace Util {
         const auto winList = Util::enumWindows();
         for (auto hwnd: winList) {
             if (!hwnd) continue;
-            // 忽略权限高于自身的窗口
+            // 高权限窗口：非管理员运行时也纳入列表（switchToWindow 内置 SetForegroundWindow
+            // 失败时的回退链，见其注释），最大化非管理员模式下的可用功能。
+            // 管理员窗口的 exe 路径经 PROCESS_QUERY_LIMITED_INFORMATION 仍可读取（图标/标题正常）。
             if (!isUserAdmin && isWindowElevated(hwnd)) {
-                // 有什么必要忽略呢？ 采用LIMITED权限OpenProcess之后，（低权限模式下）确实能读取更多窗口的exe路径了（例如管理员窗口）
-                // 是好事吗？ No, 只是泡沫而已；看起来可以显示更多窗口，实则无法控制：ShowWindow()无法对更高权限窗口生效
-                // PostMessage可以，但是无法使用NOACTIVE版本，窗口必被激活
-                // 此时由于权限不足，Hook失效，无法进一步检测 Alt or 任务栏滚轮，导致非常鸡肋
-                // https://stackoverflow.com/questions/13468331/showwindow-function-doesnt-work-when-target-application-is-run-as-administrator
-                qDebug() << "#ignore elevated:" << hwnd << getWindowTitle(hwnd);
-                continue;
+                qDebug() << "#elevated window included (non-admin mode):" << hwnd << getWindowTitle(hwnd);
             }
 
             /* fix `isWindowCloaked()`之后，以下代码无用
