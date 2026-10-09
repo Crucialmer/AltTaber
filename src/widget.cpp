@@ -252,7 +252,7 @@ QList<WindowGroup> Widget::prepareWindowGroupList() {
         auto& winGroup = winGroupMap[path];
         if (winGroup.exePath.isEmpty()) { // QIcon::isNull 判断可能不太准（例如空图标）
             winGroup.exePath = path;
-            auto icon = Util::getCachedIcon(path, hwnd); // TODO background thread
+            auto icon = Util::getCachedIcon(path, hwnd); // 图标由后台预取（Util::startIconPrefetch）提前缓存，此处基本零等待
             if (path.endsWith("QQ\\bin\\QQ.exe", Qt::CaseInsensitive)) { // draw chat partner for classical QQ
                 QPixmap overlay = Util::getWindowIcon(hwnd);
                 const auto iSize = lw->iconSize();
@@ -548,7 +548,10 @@ bool Widget::eventFilter(QObject* watched, QEvent* event) {
 /// `forward`: true for restore, false for minimize
 void Widget::rotateTaskbarWindowInGroup(const QString& exePath, bool forward, int windows) {
     static constexpr auto mouseEvent = [](DWORD flag) { // 文件内共享：timer 回调 lambda 也要用，不能是块作用域
-        mouse_event(flag, 0, 0, 0, 0); // TODO 应迁移到 SendInput（mouse_event 已被标记为 legacy）
+        // 已迁移至 SendInput（mouse_event 为 legacy API）；不设 MOVE 标志 = 于当前光标位置注入按钮事件，语义与原来一致
+        INPUT input = {.type = INPUT_MOUSE};
+        input.mi.dwFlags = flag;
+        SendInput(1, &input, sizeof(INPUT));
     };
     qDebug() << "(Taskbar)Wheel on:" << exePath << forward << windows;
     if (exePath.isEmpty()) return;

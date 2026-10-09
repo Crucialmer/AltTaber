@@ -25,6 +25,7 @@ namespace Util {
     QList<HWND> findTopWindows(const QString& className, const QString& title = QString());
     QIcon getJumboIcon(const QString& filePath);
     QIcon getCachedIcon(const QString& path, HWND hwnd);
+    void startIconPrefetch(); // 后台图标预取：工作线程提前提取图标，避免弹窗时首次同步等待
     QPixmap getWindowIcon(HWND hwnd);
     bool setWindowRoundCorner(HWND hwnd, DWM_WINDOW_CORNER_PREFERENCE pvAttribute = DWMWCP_ROUND);
     bool isKeyPressed(int vkey);

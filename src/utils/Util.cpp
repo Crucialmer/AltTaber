@@ -21,6 +21,12 @@
 #include <winrt/Windows.Management.Deployment.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.ApplicationModel.h>
+#include <QThread>
+#include <QMutex>
+#include <QSet>
+#include <QTimer>
+#include <QImage>
+#include <atomic>
 
 namespace Util {
     QString getWindowTitle(HWND hwnd) {
@@ -506,6 +512,104 @@ namespace Util {
         return {};
     }
 
+    // ----------------- 后台图标预取（工作线程提取 QImage；GUI 线程转换为 QIcon） -----------------
+    namespace {
+        QMutex g_iconPrefetchMutex;              // 保护以下两个容器
+        QHash<QString, QImage> g_iconImageCache; // 后台提取好的图标图像（GUI 转换后即移除，控制内存）
+        QSet<QString> g_iconResolvedPaths;       // GUI 线程已得到最终图标的 path，后台不再提取
+
+        /// 供后台线程使用：提取 Jumbo 图标为 QImage（全程不创建 QPixmap/QIcon，线程安全）
+        QImage extractJumboIconImage(const QString& filePath) {
+            SHFILEINFOW sfi = {nullptr};
+            SHGetFileInfo(filePath.toStdWString().c_str(), 0, &sfi, sizeof(SHFILEINFOW), SHGFI_SYSICONINDEX);
+
+            IImageList* imageList = nullptr;
+            HRESULT hResult = SHGetImageList(SHIL_JUMBO, IID_IImageList, (void**) &imageList);
+
+            QImage image;
+            if (hResult == S_OK) {
+                HICON hIcon;
+                hResult = imageList->GetIcon(sfi.iIcon, ILD_TRANSPARENT, &hIcon);
+                if (hResult == S_OK) {
+                    image = QImage::fromHICON(hIcon);
+                    DestroyIcon(hIcon);
+                }
+            }
+            if (imageList)
+                imageList->Release();
+            return image;
+        }
+
+        /// 后台任务体：枚举当前所有窗口进程，提前提取尚未缓存的图标
+        void prefetchIconsWorker() {
+            // 工作线程单独初始化 COM（SHGetImageList 依赖；主线程已初始化 STA，此处安全再入）
+            const HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+            QElapsedTimer timer;
+            timer.start();
+            int count = 0;
+            QSet<QString> seen;
+            for (auto hwnd: listValidWindows()) {
+                auto path = getWindowProcessPath(hwnd);
+                if (path.isEmpty() || seen.contains(path)) continue;
+                seen.insert(path);
+                {
+                    QMutexLocker locker(&g_iconPrefetchMutex);
+                    if (g_iconResolvedPaths.contains(path) || g_iconImageCache.contains(path))
+                        continue; // 已有最终结果或已被预取
+                }
+                auto image = extractJumboIconImage(path);
+                if (image.isNull()) continue;
+                {
+                    QMutexLocker locker(&g_iconPrefetchMutex);
+                    if (!g_iconResolvedPaths.contains(path)) // 期间 GUI 可能已抢先给出最终结果
+                        g_iconImageCache.insert(path, image);
+                }
+                count++;
+            }
+            if (count > 0)
+                qDebug() << "Icon prefetch:" << count << "icons in" << timer.elapsed() << "ms";
+            if (SUCCEEDED(hr))
+                CoUninitialize();
+        }
+    } // anonymous namespace
+
+    /// 从预取缓存取出图像（取出即删除；GUI 线程调用）
+    QImage takePrefetchedIconImage(const QString& path) {
+        QMutexLocker locker(&g_iconPrefetchMutex);
+        return g_iconImageCache.take(path);
+    }
+
+    /// 标记 path 已由 GUI 线程得到最终图标
+    void markIconResolved(const QString& path) {
+        QMutexLocker locker(&g_iconPrefetchMutex);
+        g_iconResolvedPaths.insert(path);
+    }
+
+    /// 启动后台图标预取（GUI 线程调用一次）：启动后 10s 首跑，此后每 60s 一次
+    void startIconPrefetch() {
+        static bool started = false;
+        if (started)
+            return;
+        started = true;
+        static std::atomic_bool busy{false};
+        auto runOnce = [] {
+            bool expected = false;
+            if (!busy.compare_exchange_strong(expected, true))
+                return; // 上一轮仍在运行
+            auto* thread = QThread::create([] {
+                prefetchIconsWorker();
+                busy.store(false);
+            });
+            QObject::connect(thread, &QThread::finished, thread, &QThread::deleteLater);
+            thread->start();
+        };
+        static QTimer timer;
+        QObject::connect(&timer, &QTimer::timeout, runOnce);
+        timer.start(60 * 1000);
+        QTimer::singleShot(10 * 1000, runOnce);
+        qDebug() << "Icon prefetch scheduled (first in 10s, then every 60s)";
+    }
+
     /// Cached Icon, including UWP<br>
     /// `hwnd` is for getting UWP package full name<br>
     /// 如果想要直接通过exe path获取icon，就只能通过`FindPackagesForUser`枚举不太优雅<br>
@@ -526,7 +630,11 @@ namespace Util {
             qDebug() << "Detect UWP" << path;
             icon = AppUtil::getAppIcon(uwpDir + "\\fake.exe");
         } else { // win32 desktop app
-            icon = getJumboIcon(path);
+            if (auto img = takePrefetchedIconImage(path); !img.isNull()) { // 后台预取命中：直接转换，零等待
+                icon = QIcon(QPixmap::fromImage(img));
+            } else {
+                icon = getJumboIcon(path);
+            }
             if (isBottomRightTransparent(icon)) {
                 // 对于不包含大图标的exe，例如[Follower]获取64x64的图标，但只有左上角有8x8图标，其余透明）
                 // 通过检测右下角1/4区域来判定这种小图标情况，改为获取小号size图标，则会正常（如48x48）（也许需要向下遍历，但是一般情况下够用了）
@@ -535,6 +643,7 @@ namespace Util {
             }
         }
         IconCache.insert(path, icon);
+        markIconResolved(path); // 已得到最终图标，通知后台预取跳过该 path
         qDebug() << "Icon not found in cache, loaded in" << t.elapsed() << "ms" << path;
         return icon;
     }

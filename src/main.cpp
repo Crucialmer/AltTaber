@@ -40,6 +40,7 @@ int main(int argc, char* argv[]) {
     qApp->setQuitOnLastWindowClosed(false);
     auto* winSwitcher = new Widget;
     winSwitcher->prepareListWidget(); // 优化：对ListWidget进行预先初始化，首次执行`setCurrentRow`特别耗时(472ms)
+    Util::startIconPrefetch(); // 图标后台预取：新应用图标由工作线程提前提取，弹窗时无需首次同步等待
 
     QObject::connect(&a, &QApplication::aboutToQuit, []() {
         unhookWinEvent();
