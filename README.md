@@ -1,8 +1,10 @@
 ﻿# AltTaber
 
-> **Fork 维护版**：基于 [MrBeanCpp/AltTaber](https://github.com/MrBeanCpp/AltTaber) 的个人维护分支，
-> 包含 22 项 bug 修复、性能优化（钩子异步化、托盘菜单加速）、
-> 新功能 **Alt+Tab / Ctrl+Alt+Tab 固定切换器**（松开按键后保持显示，Tab 循环、Enter/空格 确认、Esc 取消）与 GitHub Actions 自动构建发布。
+> **Fork 维护版**：基于 [MrBeanCpp/AltTaber](https://github.com/MrBeanCpp/AltTaber) 的个人维护分支，持续维护中。
+> 累计 40+ 项 bug 修复与优化：崩溃/正确性修复、**中文环境兼容修复**（中文用户名/路径下的开机自启动与自动更新）、
+> 性能优化（钩子异步化、托盘菜单加速、**图标后台预取**）、非管理员模式功能增强，
+> 以及新功能 **Alt+Tab / Ctrl+Alt+Tab 固定切换器**（松开按键后保持显示，Tab 循环、Enter/空格 确认、Esc 取消）、
+> **字体自定义**（字族 / 字号（支持小数）/ 字重均可配置）与 GitHub Actions 自动构建发布。
 > 下载：[Releases](https://github.com/Crucialmer/AltTaber/releases)
 
 ![GitHub release (latest by date)](https://img.shields.io/github/v/release/Crucialmer/AltTaber)
@@ -95,6 +97,8 @@
 
 - 系统窗口：如任务管理器
 - 管理员权限窗口：如游戏加速器
+
+> Fork 版增强：非管理员模式下，高权限窗口也会照常出现在切换列表中；若系统拦截了焦点切换，会自动将其置顶并闪烁提示（不抢焦点），点击一次即可激活。
 
 ### 开机自启动
 
