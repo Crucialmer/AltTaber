@@ -314,6 +314,37 @@ bool Widget::prepareListWidget() {
     // 新一轮弹窗交互开始：解除上一轮遗留的"双击屏蔽"（若有），避免其吞掉本轮在同一位置的第一次点击
     Util::disarmClickShield();
     auto winGroupList = prepareWindowGroupList();
+
+    // get screen（窗口定位与自适应都需要，提前获取）
+    bool displayOnPrimary = (cfg.getDisplayMonitor() == PrimaryMonitor);
+    auto screen = displayOnPrimary ?
+                  QGuiApplication::primaryScreen() :
+                  QGuiApplication::screenAt(QCursor::pos()); // multi-screen support
+    if (!screen && !displayOnPrimary) { // fallback to primary screen
+        qWarning() << "Cursor Screen nullptr! Fallback to primary";
+        screen = QApplication::primaryScreen();
+    }
+    if (!screen) {
+        qWarning() << "Screen nullptr!";
+        sysTray.showMessage("Error", "Screen nullptr!");
+        return false;
+    }
+
+    // 自适应：应用过多时压缩单元格与图标，保证整行容纳在屏幕宽度内（每次弹窗重算，数量回落自动复原）
+    // 基准：默认单元格 80 / 图标 64（四周 8px 边距）；压缩下限：单元格 48 / 图标 32
+    if (!winGroupList.isEmpty()) {
+        constexpr int CELL_DEFAULT = 80, ICON_DEFAULT = 64, CELL_MIN = 48, ICON_MIN = 32;
+        const int count = winGroupList.size();
+        const int availableW = screen->availableGeometry().width() - ListWidgetMargin.left() - ListWidgetMargin.right() - 8; // 8px 余量
+        const int cell = qBound(CELL_MIN, availableW / count, CELL_DEFAULT);
+        const int icon = qBound(ICON_MIN, cell - (CELL_DEFAULT - ICON_DEFAULT), ICON_DEFAULT);
+        lw->setGridSize({cell, cell});
+        lw->setIconSize({icon, icon});
+        lw->setFixedHeight(cell); // 列表高度 = 单元格高度（单行）
+        if (cell < CELL_DEFAULT)
+            qInfo() << "Adaptive icons:" << count << "apps -> cell" << cell << ", icon" << icon;
+    }
+
     lw->clear();
     for (auto& winGroup: winGroupList) {
         auto item = new QListWidgetItem(winGroup.icon, {}); // null != "", which will completely hide text area
@@ -328,21 +359,6 @@ bool Widget::prepareListWidget() {
         auto firstRect = lw->visualItemRect(firstItem);
         auto width = lw->gridSize().width() * lw->count() + (firstRect.x() - lw->frameWidth()); // 一些微小的噼里啪啦修正
         lw->setFixedWidth(width);
-
-        // get screen
-        bool displayOnPrimary = (cfg.getDisplayMonitor() == PrimaryMonitor);
-        auto screen = displayOnPrimary ?
-                      QGuiApplication::primaryScreen() :
-                      QGuiApplication::screenAt(QCursor::pos()); // multi-screen support
-        if (!screen && !displayOnPrimary) { // fallback to primary screen
-            qWarning() << "Cursor Screen nullptr! Fallback to primary";
-            screen = QApplication::primaryScreen();
-        }
-        if (!screen) {
-            qWarning() << "Screen nullptr!";
-            sysTray.showMessage("Error", "Screen nullptr!");
-            return false;
-        }
 
         // move to scrren center
         qDebug() << "Screen:" << screen->name();
